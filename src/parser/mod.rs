@@ -1,9 +1,13 @@
 use std::iter::Peekable;
 
-use crate::module::*;
-
 pub mod lexer;
 use self::lexer::*;
+
+pub mod ast;
+use self::ast::*;
+
+pub mod error;
+use self::error::*;
 
 pub struct Parser<'a> {
     tokens: Peekable<Lex<'a>>,
@@ -22,6 +26,14 @@ impl<'a> Parser<'a> {
         let mut module = Module::default();
 
         while self.tokens.peek().is_some() {
+            // let proc = match self.parse_proc() {
+            //     Ok(proc) => proc,
+            //     Err(err) => {
+            //         panic!("{:?}", err);
+            //         self.add_error(err);
+            //         break;
+            //     }
+            // };
             let proc = self.parse_proc().unwrap();
             module.procedures.push(proc);
         }
@@ -32,71 +44,100 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_proc(&mut self) -> Result<Procedure, Error<'a>> {
+    fn parse_proc(&mut self) -> Result<Procedure<'a>, Error<'a>> {
         self.expect_keyword("proc")?;
 
-        let entry_name = self.expect_token()?.text.to_owned();
-        let entry_params = self.parse_parameter_list()?;
+        let name = self.expect_token()?.text;
+        let parameters = self.parse_parameter_list()?;
         let return_typ = self.parse_typ_annotation()?;
-        let entry_block = BasicBlock {
-            name: entry_name,
-            parameters: entry_params,
-            instructions: vec![],
-        };
+        let basic_blocks = self.parse_proc_body()?;
 
         Ok(Procedure {
+            name,
+            parameters,
             return_typ,
-            entry_block,
-            other_blocks: vec![],
+            basic_blocks,
         })
     }
 
-    fn parse_parameter_list(&mut self) -> Result<Vec<Parameter>, Error<'a>> {
-        self.parse_delimited_list(|p| p.parse_parameter(), "(", ",", ")")
+    fn parse_parameter_list(&mut self) -> Result<Vec<Parameter<'a>>, Error<'a>> {
+        self.parse_delimited_list(|p| p.parse_parameter(), "(", Some(","), ")")
     }
 
-    fn parse_parameter(&mut self) -> Result<Parameter, Error<'a>> {
-        let register = self.parse_register()?;
+    fn parse_parameter(&mut self) -> Result<Parameter<'a>, Error<'a>> {
+        let name = self
+            .expect_any_alphanumeric(ExpectedKind::RegisterName)?
+            .text;
         let typ = self.parse_typ_annotation()?;
 
-        Ok(Parameter { register, typ })
+        Ok(Parameter { name, typ })
     }
 
-    fn parse_register(&mut self) -> Result<u32, Error<'a>> {
-        let register_name_token = self.expect_any_alphanumeric(ExpectedKind::RegisterName)?;
-        let register_name = register_name_token.text;
-        if register_name.chars().count() < 2 || !register_name.starts_with('v') {
-            return Err(Error::invalid_register(register_name_token));
-        }
-
-        if let Ok(register) = register_name.trim_start_matches('v').parse::<u32>() {
-            Ok(register)
-        } else {
-            Err(Error::invalid_register(register_name_token))
-        }
-    }
-
-    fn parse_typ_annotation(&mut self) -> Result<Typ, Error<'a>> {
+    fn parse_typ_annotation(&mut self) -> Result<&'a str, Error<'a>> {
         match self.expect_keyword(":") {
             Ok(_) => (),
             Err(err) if err.is_recoverable() => {
                 let token = self.predict_token()?;
-                return Err(Error::missing(ExpectedKind::TypeAnnotation, token));
+                return Err(Error::unexpected(ExpectedKind::TypeAnnotation, token));
             }
             Err(err) => return Err(err),
         }
-        let typ = self.expect_any_alphanumeric(ExpectedKind::TypeName)?;
-        Ok(Typ)
+        let typ_token = self.expect_any_alphanumeric(ExpectedKind::TypeName)?;
+        Ok(typ_token.text)
+    }
+
+    fn parse_proc_body(&mut self) -> Result<Vec<BasicBlock<'a>>, Error<'a>> {
+        self.parse_delimited_list(|this| this.parse_basic_block(), "{", None, "}")
+    }
+
+    fn parse_basic_block(&mut self) -> Result<BasicBlock<'a>, Error<'a>> {
+        let name = self.expect_any_alphanumeric(ExpectedKind::BlockName)?.text;
+
+        let mut parameters = vec![];
+
+        let token = self.predict_token()?;
+        match token.text {
+            "(" => parameters = self.parse_parameter_list()?,
+            "{" => (),
+            _ => return Err(Error::unexpected(ExpectedKind::Block, token)),
+        }
+        let instructions = self.parse_basic_block_body()?;
+        dbg!(2);
+
+        Ok(BasicBlock {
+            name,
+            parameters,
+            instructions,
+        })
+    }
+
+    fn parse_basic_block_body(&mut self) -> Result<Vec<Instruction<'a>>, Error<'a>> {
+        self.parse_delimited_list(|this| this.parse_instruction(), "{", None, "}")
+    }
+
+    fn parse_instruction(&mut self) -> Result<Instruction<'a>, Error<'a>> {
+        let _ = self.expect_any_alphanumeric(ExpectedKind::Opcode)?;
+        self.expect_keyword(";")?;
+
+        Ok(Instruction {
+            opcode: todo!("instruction"),
+            operands: vec![],
+            target_block: None,
+            condition: None,
+        })
     }
 
     fn parse_delimited_list<T>(
         &mut self,
         parse_item: impl Fn(&mut Self) -> Result<T, Error<'a>>,
         open: &'static str,
-        sep: &'static str,
+        separator: Option<&'static str>,
         close: &'static str,
     ) -> Result<Vec<T>, Error<'a>> {
         // recovers on bad item, but if the list is bad, let the parent do the recovery
+
+        // The lexer should not output tokens with empty text, so I'll use that to handle when caller doesn't want a separator.
+        let sep = separator.unwrap_or("");
 
         self.expect_keyword(open)?;
 
@@ -106,13 +147,20 @@ impl<'a> Parser<'a> {
                 Ok(item) => items.push(item),
                 Err(err) if err.is_recoverable() => {
                     self.add_error(err);
-                    self.recover_until_keywords([sep, close])?;
+                    self.recover([
+                        RecoveryStrategy::Keyword(sep),
+                        RecoveryStrategy::MatchingPair {
+                            open,
+                            close,
+                            balance: 1,
+                        },
+                    ])?;
                 }
                 Err(err) => return Err(err),
             }
 
-            // If the upcoming token doesn't end the list, expect a separator
-            if !self.predict_keyword(close)? {
+            // If the upcoming token doesn't end the list, expect a separator (if caller wants one).
+            if separator.is_some() && !self.predict_keyword(close)? {
                 self.expect_keyword(sep)?;
             }
         }
@@ -121,16 +169,34 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn recover_until_keywords<const N: usize>(
+    fn recover<const N: usize>(
         &mut self,
-        keywords: [&'static str; N],
+        mut strategies: [RecoveryStrategy; N],
     ) -> Result<(), Error<'a>> {
         // returns such that the next token to be read will be one of the keywords. Error on EOF.
         'top: loop {
-            for keyword in keywords {
-                let correct_prediction = self.predict_keyword(keyword)?;
-                if correct_prediction {
-                    break 'top;
+            for strategy in &mut strategies {
+                match strategy {
+                    RecoveryStrategy::Keyword(keyword) => {
+                        if self.predict_keyword(keyword)? {
+                            break 'top;
+                        }
+                    }
+                    RecoveryStrategy::MatchingPair {
+                        open,
+                        close,
+                        balance,
+                    } => {
+                        let token = self.predict_token()?;
+                        if token.text == *open {
+                            *balance += 1;
+                        } else if token.text == *close {
+                            *balance -= 1;
+                        }
+                        if *balance == 0 {
+                            break 'top;
+                        }
+                    }
                 }
             }
             self.read_token();
@@ -138,36 +204,32 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn recover_until_matching_pair(
-        &mut self,
-        open: &'static str,
-        close: &'static str,
-    ) -> Result<(), ()> {
-        todo!()
-    }
-
     fn add_error(&mut self, error: Error<'a>) {
         self.errors.push(error);
     }
 
     fn predict_keyword(&mut self, keyword: &'static str) -> Result<bool, Error<'a>> {
-        let token = self.predict_token()?;
+        let token = self
+            .predict_token()
+            .map_eof_err_to(Error::unexpected_end_of_file(keyword))?;
         Ok(token.text == keyword)
     }
 
     fn predict_token(&mut self) -> Result<Token<'a>, Error<'a>> {
-        self.peek_token().ok_or(Error::unexpected_end_of_file())
+        self.peek_token()
+            .ok_or(Error::unexpected_end_of_file("token"))
     }
 
     fn expect_keyword(&mut self, keyword: &'static str) -> Result<Token<'a>, Error<'a>> {
         // only consume token if it corresponds to keyword
-
-        let token = self.predict_token()?;
+        let token = self
+            .predict_token()
+            .map_eof_err_to(Error::unexpected_end_of_file(keyword))?;
         if token.text == keyword {
             self.read_token();
             Ok(token)
         } else {
-            Err(Error::unexpected_keyword(keyword, token))
+            Err(Error::unexpected(keyword, token))
         }
     }
 
@@ -184,7 +246,8 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_token(&mut self) -> Result<Token<'a>, Error<'a>> {
-        self.read_token().ok_or(Error::unexpected_end_of_file())
+        self.read_token()
+            .ok_or(Error::unexpected_end_of_file("token"))
     }
 
     fn read_keyword(&mut self, keyword: &'static str) -> Result<Token<'a>, Option<Token<'a>>> {
@@ -207,91 +270,17 @@ impl<'a> Parser<'a> {
 }
 
 #[derive(Debug)]
+pub enum RecoveryStrategy {
+    Keyword(&'static str),
+    MatchingPair {
+        open: &'static str,
+        close: &'static str,
+        balance: i32,
+    },
+}
+
+#[derive(Debug)]
 pub struct ParsingResult<'a> {
     errors: Vec<Error<'a>>,
-    module: Module,
-}
-
-#[derive(Debug)]
-pub struct Error<'a> {
-    kind: ErrorKind<'a>,
-    from: usize,
-    to: usize,
-}
-
-#[derive(Debug)]
-pub enum ErrorKind<'a> {
-    UnexpectedEndOfFile,
-    UnexpectedKeyword {
-        expected: &'a str,
-        got: &'a str,
-    },
-    Unexpected {
-        expected: ExpectedKind,
-        got: &'a str,
-    },
-    Missing(ExpectedKind),
-    InvalidRegister,
-}
-
-impl<'a> Error<'a> {
-    pub fn is_recoverable(&self) -> bool {
-        match self.kind {
-            ErrorKind::UnexpectedEndOfFile => false,
-            _ => true,
-        }
-    }
-
-    pub fn unexpected_end_of_file() -> Self {
-        Self {
-            kind: ErrorKind::UnexpectedEndOfFile,
-            from: 0,
-            to: 0,
-        }
-    }
-
-    pub fn unexpected_keyword(expected: &'a str, token: Token<'a>) -> Self {
-        Self {
-            kind: ErrorKind::UnexpectedKeyword {
-                expected,
-                got: token.text,
-            },
-            from: token.start,
-            to: token.end,
-        }
-    }
-
-    pub fn unexpected(expected: ExpectedKind, token: Token<'a>) -> Self {
-        Self {
-            kind: ErrorKind::Unexpected {
-                expected,
-                got: token.text,
-            },
-            from: token.start,
-            to: token.end,
-        }
-    }
-
-    pub fn missing(missing: ExpectedKind, token: Token<'a>) -> Self {
-        Self {
-            kind: ErrorKind::Missing(missing),
-            from: token.start,
-            to: token.end,
-        }
-    }
-
-    pub fn invalid_register(token: Token<'a>) -> Self {
-        Self {
-            kind: ErrorKind::InvalidRegister,
-            from: token.start,
-            to: token.end,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExpectedKind {
-    RegisterName,
-    TypeAnnotation,
-    TypeName,
+    module: Module<'a>,
 }

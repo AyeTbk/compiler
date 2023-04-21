@@ -14,18 +14,21 @@ pub enum TokenKind {
 }
 
 pub fn lex(src: &str) -> Lex {
-    Lex { src, offset: 0 }
+    Lex {
+        src,
+        offset: 0,
+        ignore_comments: true,
+    }
 }
 
 pub struct Lex<'a> {
     src: &'a str,
     offset: usize,
+    ignore_comments: bool,
 }
 
-impl<'a> Iterator for Lex<'a> {
-    type Item = Token<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl<'a> Lex<'a> {
+    fn next_token(&mut self) -> Option<Token<'a>> {
         // Skip whitespace
         let i = if let Some((j, whitespace)) = take_while(is_whitespace_char)(self.src) {
             self.offset += whitespace.len();
@@ -37,7 +40,7 @@ impl<'a> Iterator for Lex<'a> {
         let (next_i, text, kind) = if let Some((j, text)) = take_while(is_identifier_char)(i) {
             // Identifier or number literal
             (j, text, TokenKind::Alphanumeric)
-        } else if let Some((j, text)) = pair(keyword("//"), take_until(|ch| ch == '\n'))(i) {
+        } else if let Some((j, text)) = pair(keyword("//"), take_to(|ch| ch == '\n'))(i) {
             // Single line comment
             (j, text, TokenKind::Comment)
         } else if let Some((j, text)) = take_one(i) {
@@ -58,6 +61,18 @@ impl<'a> Iterator for Lex<'a> {
             start,
             end,
         })
+    }
+}
+
+impl<'a> Iterator for Lex<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut token = self.next_token()?;
+        while self.ignore_comments && token.kind == TokenKind::Comment {
+            token = self.next_token()?;
+        }
+        Some(token)
     }
 }
 
@@ -101,7 +116,22 @@ fn take_one(i: &str) -> Option<(&str, &str)> {
     }
 }
 
-fn take_until(pred: impl Fn(char) -> bool) -> impl Fn(&str) -> Option<(&str, &str)> {
+fn take_to(pred: impl Fn(char) -> bool) -> impl Fn(&str) -> Option<(&str, &str)> {
+    take_with_predicate(pred, true)
+}
+
+// fn take_until(pred: impl Fn(char) -> bool) -> impl Fn(&str) -> Option<(&str, &str)> {
+//     take_with_predicate(pred, false)
+// }
+
+fn take_while(pred: impl Fn(char) -> bool) -> impl Fn(&str) -> Option<(&str, &str)> {
+    take_with_predicate(move |c| !pred(c), false)
+}
+
+fn take_with_predicate(
+    pred: impl Fn(char) -> bool,
+    include_first_non_match: bool,
+) -> impl Fn(&str) -> Option<(&str, &str)> {
     move |i| {
         let end_indices = i
             .char_indices()
@@ -110,14 +140,23 @@ fn take_until(pred: impl Fn(char) -> bool) -> impl Fn(&str) -> Option<(&str, &st
             .skip(1);
         let char_end_indices = end_indices.zip(i.chars());
 
-        let mut end_idx = 0;
+        let mut included_end_idx = 0;
+        let mut excluded_end_idx = 0;
 
         for (idx, ch) in char_end_indices {
+            included_end_idx = idx;
             if pred(ch) {
                 break;
             }
-            end_idx = idx;
+            excluded_end_idx = idx;
         }
+
+        let end_idx = if include_first_non_match {
+            included_end_idx
+        } else {
+            excluded_end_idx
+        };
+
         let token = &i[..end_idx];
         let next_i = &i[end_idx..];
         if token.is_empty() {
@@ -126,10 +165,6 @@ fn take_until(pred: impl Fn(char) -> bool) -> impl Fn(&str) -> Option<(&str, &st
             Some((next_i, token))
         }
     }
-}
-
-fn take_while(pred: impl Fn(char) -> bool) -> impl Fn(&str) -> Option<(&str, &str)> {
-    take_until(move |ch| !pred(ch))
 }
 
 fn is_whitespace_char(ch: char) -> bool {
