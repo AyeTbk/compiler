@@ -2,9 +2,9 @@ use super::lexer::Token;
 
 #[derive(Debug)]
 pub struct Error<'a> {
-    kind: ErrorKind<'a>,
-    from: usize,
-    to: usize,
+    pub kind: ErrorKind<'a>,
+    pub from: usize,
+    pub to: usize,
 }
 
 #[derive(Debug)]
@@ -66,6 +66,7 @@ pub enum ExpectedKind {
     TypeAnnotation,
     TypeName,
     Opcode,
+    Operand,
 }
 
 impl From<&'static str> for ExpectedKind {

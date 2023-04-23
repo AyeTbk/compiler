@@ -9,6 +9,8 @@ use self::ast::*;
 pub mod error;
 use self::error::*;
 
+pub const KEYWORDS: &'static [&'static str] = &["proc", "if"];
+
 pub struct Parser<'a> {
     tokens: Peekable<Lex<'a>>,
     errors: Vec<Error<'a>>,
@@ -49,7 +51,12 @@ impl<'a> Parser<'a> {
 
         let name = self.expect_token()?.text;
         let parameters = self.parse_parameter_list()?;
-        let return_typ = self.parse_typ_annotation()?;
+
+        let mut return_typ = None;
+        if self.predict_keyword(":")? {
+            return_typ = Some(self.parse_typ_annotation()?);
+        }
+
         let basic_blocks = self.parse_proc_body()?;
 
         Ok(Procedure {
@@ -116,15 +123,75 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_instruction(&mut self) -> Result<Instruction<'a>, Error<'a>> {
-        let _ = self.expect_any_alphanumeric(ExpectedKind::Opcode)?;
+        let first = self.expect_any_alphanumeric(ExpectedKind::Opcode)?;
+        let second = self.predict_token()?;
+
+        let mut destination = None;
+        let opcode;
+
+        if second.text == "=" {
+            // Instruction is an assignment
+            destination = Some(first.text);
+            self.expect_token()?; // Skip second token which is "="
+            opcode = self.expect_any_alphanumeric(ExpectedKind::Opcode)?.text;
+        } else {
+            // Instruction is not an assignment
+            opcode = first.text;
+        }
+
+        let mut operands = Vec::new();
+        let mut target_block = None;
+        let mut condition = None;
+
+        let mut token = self.predict_token()?;
+        if token.text == "#" {
+            target_block = Some(self.parse_instruction_target_block()?);
+            token = self.predict_token()?;
+        }
+        if token.kind == TokenKind::Alphanumeric && !KEYWORDS.contains(&token.text) {
+            operands = self.parse_instruction_operands()?;
+            token = self.predict_token()?;
+        }
+        if token.text == "if" {
+            condition = Some(self.parse_instruction_condition()?);
+        }
+
         self.expect_keyword(";")?;
 
         Ok(Instruction {
-            opcode: todo!("instruction"),
-            operands: vec![],
-            target_block: None,
-            condition: None,
+            opcode,
+            operands,
+            destination,
+            target_block,
+            condition,
         })
+    }
+
+    fn parse_instruction_target_block(&mut self) -> Result<&'a str, Error<'a>> {
+        self.expect_keyword("#")?;
+        let target_block_name = self.expect_any_alphanumeric(ExpectedKind::BlockName)?.text;
+        Ok(target_block_name)
+    }
+
+    fn parse_instruction_operands(&mut self) -> Result<Vec<&'a str>, Error<'a>> {
+        let mut operands = Vec::new();
+        loop {
+            let operand = self.expect_any_alphanumeric(ExpectedKind::Operand)?.text;
+            operands.push(operand);
+            if !self.predict_keyword(",")? {
+                break;
+            }
+            self.expect_token()?;
+        }
+        Ok(operands)
+    }
+
+    fn parse_instruction_condition(&mut self) -> Result<&'a str, Error<'a>> {
+        self.expect_keyword("if")?;
+        let condtion = self
+            .expect_any_alphanumeric(ExpectedKind::RegisterName)?
+            .text;
+        Ok(condtion)
     }
 
     fn parse_delimited_list<T>(
@@ -250,15 +317,6 @@ impl<'a> Parser<'a> {
             .ok_or(Error::unexpected_end_of_file("token"))
     }
 
-    fn read_keyword(&mut self, keyword: &'static str) -> Result<Token<'a>, Option<Token<'a>>> {
-        let Some(token) = self.read_token() else { return Err(None) };
-        if token.text == keyword {
-            Ok(token)
-        } else {
-            Err(Some(token))
-        }
-    }
-
     fn read_token(&mut self) -> Option<Token<'a>> {
         let token = self.tokens.next()?;
         Some(token)
@@ -281,6 +339,6 @@ pub enum RecoveryStrategy {
 
 #[derive(Debug)]
 pub struct ParsingResult<'a> {
-    errors: Vec<Error<'a>>,
-    module: Module<'a>,
+    pub errors: Vec<Error<'a>>,
+    pub module: Module<'a>,
 }
