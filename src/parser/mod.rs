@@ -49,7 +49,7 @@ impl<'a> Parser<'a> {
     fn parse_proc(&mut self) -> Result<Procedure<'a>, Error<'a>> {
         self.expect_keyword("proc")?;
 
-        let name = self.expect_token()?.text;
+        let name = self.expect_token()?.span();
         let parameters = self.parse_parameter_list()?;
 
         let mut return_typ = None;
@@ -74,13 +74,13 @@ impl<'a> Parser<'a> {
     fn parse_parameter(&mut self) -> Result<Parameter<'a>, Error<'a>> {
         let name = self
             .expect_any_alphanumeric(ExpectedKind::RegisterName)?
-            .text;
+            .span();
         let typ = self.parse_typ_annotation()?;
 
         Ok(Parameter { name, typ })
     }
 
-    fn parse_typ_annotation(&mut self) -> Result<&'a str, Error<'a>> {
+    fn parse_typ_annotation(&mut self) -> Result<Span<'a>, Error<'a>> {
         match self.expect_keyword(":") {
             Ok(_) => (),
             Err(err) if err.is_recoverable() => {
@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
             Err(err) => return Err(err),
         }
         let typ_token = self.expect_any_alphanumeric(ExpectedKind::TypeName)?;
-        Ok(typ_token.text)
+        Ok(typ_token.span())
     }
 
     fn parse_proc_body(&mut self) -> Result<Vec<BasicBlock<'a>>, Error<'a>> {
@@ -98,7 +98,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_basic_block(&mut self) -> Result<BasicBlock<'a>, Error<'a>> {
-        let name = self.expect_any_alphanumeric(ExpectedKind::BlockName)?.text;
+        let name = self
+            .expect_any_alphanumeric(ExpectedKind::BlockName)?
+            .span();
 
         let mut parameters = vec![];
 
@@ -109,7 +111,6 @@ impl<'a> Parser<'a> {
             _ => return Err(Error::unexpected(ExpectedKind::Block, token)),
         }
         let instructions = self.parse_basic_block_body()?;
-        dbg!(2);
 
         Ok(BasicBlock {
             name,
@@ -131,12 +132,12 @@ impl<'a> Parser<'a> {
 
         if second.text == "=" {
             // Instruction is an assignment
-            destination = Some(first.text);
+            destination = Some(first.span());
             self.expect_token()?; // Skip second token which is "="
-            opcode = self.expect_any_alphanumeric(ExpectedKind::Opcode)?.text;
+            opcode = self.expect_any_alphanumeric(ExpectedKind::Opcode)?.span();
         } else {
             // Instruction is not an assignment
-            opcode = first.text;
+            opcode = first.span();
         }
 
         let mut operands = Vec::new();
@@ -167,16 +168,18 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_instruction_target_block(&mut self) -> Result<&'a str, Error<'a>> {
+    fn parse_instruction_target_block(&mut self) -> Result<Span<'a>, Error<'a>> {
         self.expect_keyword("#")?;
-        let target_block_name = self.expect_any_alphanumeric(ExpectedKind::BlockName)?.text;
+        let target_block_name = self
+            .expect_any_alphanumeric(ExpectedKind::BlockName)?
+            .span();
         Ok(target_block_name)
     }
 
-    fn parse_instruction_operands(&mut self) -> Result<Vec<&'a str>, Error<'a>> {
+    fn parse_instruction_operands(&mut self) -> Result<Vec<Span<'a>>, Error<'a>> {
         let mut operands = Vec::new();
         loop {
-            let operand = self.expect_any_alphanumeric(ExpectedKind::Operand)?.text;
+            let operand = self.expect_any_alphanumeric(ExpectedKind::Operand)?.span();
             operands.push(operand);
             if !self.predict_keyword(",")? {
                 break;
@@ -186,11 +189,11 @@ impl<'a> Parser<'a> {
         Ok(operands)
     }
 
-    fn parse_instruction_condition(&mut self) -> Result<&'a str, Error<'a>> {
+    fn parse_instruction_condition(&mut self) -> Result<Span<'a>, Error<'a>> {
         self.expect_keyword("if")?;
         let condtion = self
             .expect_any_alphanumeric(ExpectedKind::RegisterName)?
-            .text;
+            .span();
         Ok(condtion)
     }
 
@@ -324,6 +327,16 @@ impl<'a> Parser<'a> {
 
     fn peek_token(&mut self) -> Option<Token<'a>> {
         self.tokens.peek().map(|t| *t)
+    }
+}
+
+impl<'a> lexer::Token<'a> {
+    pub fn span(self) -> Span<'a> {
+        Span {
+            text: self.text,
+            from: self.start,
+            to: self.end,
+        }
     }
 }
 

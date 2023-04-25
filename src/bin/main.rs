@@ -1,8 +1,18 @@
-use compiler_backend::parser;
+use compiler_backend::{
+    error_reporting::{convert_parser_error, report_error},
+    parser,
+};
 
 fn main() {
-    let src = std::fs::read_to_string("data/example.ayir").unwrap();
-    // let result = parser::lexer::lex(&src).collect::<Vec<_>>();
-    let result = parser::Parser::new(&src).parse();
-    dbg!(result);
+    let source_name = "data/errors.ayir";
+    let source = std::fs::read_to_string(source_name).unwrap();
+    // let result = parser::lexer::lex(&source).collect::<Vec<_>>();
+    let result = parser::Parser::new(&source).parse();
+
+    for parse_error in result.errors {
+        let e = convert_parser_error(parse_error, source_name, &source);
+        report_error(e);
+    }
+
+    // dbg!(result.module);
 }
