@@ -40,6 +40,9 @@ impl<'a> Lex<'a> {
         let (next_i, text, kind) = if let Some((j, text)) = take_while(is_identifier_char)(i) {
             // Identifier or number literal
             (j, text, TokenKind::Alphanumeric)
+        } else if let Some((j, text)) = any_keyword_of(&["==", "!="])(i) {
+            // Multichar operator
+            (j, text, TokenKind::Token)
         } else if let Some((j, text)) = pair(keyword("//"), take_to(|ch| ch == '\n'))(i) {
             // Single line comment
             (j, text, TokenKind::Comment)
@@ -73,6 +76,18 @@ impl<'a> Iterator for Lex<'a> {
             token = self.next_token()?;
         }
         Some(token)
+    }
+}
+
+fn any_keyword_of(keywords: &'static [&'static str]) -> impl Fn(&str) -> Option<(&str, &str)> {
+    move |i| {
+        for kw in keywords {
+            let result = keyword(kw)(i);
+            if result.is_some() {
+                return result;
+            }
+        }
+        None
     }
 }
 

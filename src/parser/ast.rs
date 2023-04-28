@@ -30,7 +30,13 @@ pub struct Instruction<'a> {
     pub operands: Vec<Span<'a>>,
     pub destination: Option<Span<'a>>,
     pub target_block: Option<Span<'a>>,
-    pub condition: Option<Span<'a>>,
+    pub condition: Option<Condition<'a>>,
+}
+
+#[derive(Debug)]
+pub enum Condition<'a> {
+    Equals(Span<'a>, Span<'a>),
+    NotEquals(Span<'a>, Span<'a>),
 }
 
 #[derive(Debug)]

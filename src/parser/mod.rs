@@ -189,12 +189,18 @@ impl<'a> Parser<'a> {
         Ok(operands)
     }
 
-    fn parse_instruction_condition(&mut self) -> Result<Span<'a>, Error<'a>> {
+    fn parse_instruction_condition(&mut self) -> Result<Condition<'a>, Error<'a>> {
         self.expect_keyword("if")?;
-        let condtion = self
-            .expect_any_alphanumeric(ExpectedKind::RegisterName)?
-            .span();
-        Ok(condtion)
+        let op1 = self.expect_any_alphanumeric(ExpectedKind::Operand)?.span();
+        let operator = self.expect_any_keyword_of(&["==", "!="])?;
+        let op2 = self.expect_any_alphanumeric(ExpectedKind::Operand)?.span();
+        if operator.text == "==" {
+            Ok(Condition::Equals(op1, op2))
+        } else if operator.text == "!=" {
+            Ok(Condition::NotEquals(op1, op2))
+        } else {
+            panic!("dont happen plz tyvm");
+        }
     }
 
     fn parse_delimited_list<T>(
@@ -301,6 +307,24 @@ impl<'a> Parser<'a> {
         } else {
             Err(Error::unexpected(keyword, token))
         }
+    }
+
+    fn expect_any_keyword_of(
+        &mut self,
+        keywords: &'static [&'static str],
+    ) -> Result<Token<'a>, Error<'a>> {
+        // only consume token if it corresponds to keyword
+        let token = self
+            .predict_token()
+            .map_eof_err_to(Error::unexpected_end_of_file(keywords))?;
+        for keyword in keywords {
+            if token.text == *keyword {
+                self.read_token();
+                return Ok(token);
+            }
+        }
+
+        Err(Error::unexpected(keywords, token))
     }
 
     fn expect_any_alphanumeric(&mut self, what: ExpectedKind) -> Result<Token<'a>, Error<'a>> {
