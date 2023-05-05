@@ -1,13 +1,10 @@
 use std::iter::Peekable;
 
-pub mod lexer;
-use self::lexer::*;
-
-pub mod ast;
-use self::ast::*;
+use super::ast::*;
+use super::lexer::{self, *};
 
 pub mod error;
-use self::error::*;
+use error::*;
 
 pub const KEYWORDS: &'static [&'static str] = &["proc", "if"];
 

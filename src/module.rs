@@ -1,29 +1,102 @@
 use crate::instruction::Instruction;
 
+pub type VirtualId = u32;
+pub type RegisterId = u32;
+pub type StackSlotId = u32;
+pub type ImmediateId = u32;
+
 #[derive(Debug, Default)]
 pub struct Module {
     pub procedures: Vec<Procedure>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Procedure {
     pub return_typ: Typ,
-    pub entry_block: BasicBlock,
-    pub other_blocks: Vec<BasicBlock>,
+    pub basic_blocks: BasicBlocks,
+    pub data: ProcedureData,
+}
+
+#[derive(Debug)]
+pub struct BasicBlocks {
+    pub entry: BasicBlock,
+    pub others: Vec<BasicBlock>,
 }
 
 #[derive(Debug, Default)]
+pub struct ProcedureData {
+    pub stack_slots: Vec<StackSlot>,
+}
+
+impl ProcedureData {
+    pub fn allocate_stack_slot_for(&mut self, variable: VariableNonStack) -> StackSlotId {
+        let id = self.stack_slots.len();
+        let stack_slot = StackSlot {
+            typ: Typ,
+            allocated_for: variable,
+        };
+        self.stack_slots.push(stack_slot);
+        id.try_into().unwrap()
+    }
+
+    pub fn get_stack_slot_for(&self, variable: VariableNonStack) -> Option<StackSlotId> {
+        self.stack_slots
+            .iter()
+            .enumerate()
+            .find(|(_, ss)| ss.allocated_for == variable)
+            .map(|(i, _)| i as StackSlotId)
+    }
+}
+
+impl BasicBlocks {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut BasicBlock> {
+        Some(&mut self.entry)
+            .into_iter()
+            .chain(self.others.iter_mut())
+    }
+}
+
+#[derive(Debug)]
+pub struct StackSlot {
+    pub typ: Typ,
+    pub allocated_for: VariableNonStack,
+}
+
+#[derive(Debug)]
 pub struct BasicBlock {
     pub name: String,
     pub parameters: Vec<Parameter>,
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Parameter {
-    pub register: u32,
+    pub variable: Variable,
     pub typ: Typ,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variable {
+    Virtual(VirtualId),
+    Register(RegisterId),
+    Stack(StackSlotId),
+}
+
+impl Variable {
+    pub fn into_non_stack(self) -> Option<VariableNonStack> {
+        match self {
+            Self::Register(id) => Some(VariableNonStack::Register(id)),
+            Self::Virtual(id) => Some(VariableNonStack::Virtual(id)),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariableNonStack {
+    Virtual(VirtualId),
+    Register(RegisterId),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Typ;

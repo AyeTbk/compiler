@@ -1,4 +1,4 @@
-use crate::parser::error::Error as ParseError;
+use crate::serialize::parser::error::Error as ParseError;
 
 pub fn convert_parser_error<'a>(
     parse_error: ParseError<'a>,
@@ -37,15 +37,23 @@ pub fn convert_parser_error<'a>(
 }
 
 pub fn report_error(error: ErrorReport) {
+    // example output:
+    //    error: Unexpected { expected: Opcode, got: "?" }
+    //     at data/errors.ayir:4:25
+    //    4 |         v4 = sub v1, v2; ???
+    //                                 ^
+
     eprintln!("error: {}", error.message);
     eprintln!(
         "  at {}:{}:{}",
         error.source_name, error.line_number, error.from
     );
-    eprintln!("  | {}", error.source_line);
+
+    let left_info = format!(" {} | ", error.line_number);
+    eprintln!("{}{}", left_info, error.source_line);
     eprintln!(
-        "    {}{}",
-        " ".repeat(error.from),
+        "{}{}",
+        " ".repeat(left_info.len() + error.from),
         "^".repeat(error.to - error.from)
     );
 }
