@@ -1,5 +1,5 @@
 use crate::{
-    instruction::{Instruction, Opcode},
+    instruction::{Instruction, Opcode, SourceOperand, SourceOperands},
     module::{BasicBlock, BasicBlocks, Module, Parameter, Procedure, ProcedureData, Typ, Variable},
 };
 
@@ -67,8 +67,10 @@ fn ast_instruction_to_instruction(
 ) -> Result<Instruction, Error> {
     Ok(Instruction {
         opcode: ast_opcode_to_opcode(&ast_instruction.opcode)?,
-        src: todo!(),
-        dst: todo!(),
+        src: SourceOperands {
+            operands: ast_map(&ast_instruction.operands, ast_operand_to_operand)?,
+        },
+        dst: ast_map_option(&ast_instruction.destination, ast_variable_to_variable)?,
     })
 }
 
@@ -89,7 +91,13 @@ fn ast_variable_to_variable(ast_variable: &ast::Span) -> Result<Variable, Error>
 }
 
 fn ast_opcode_to_opcode(ast_opcode: &ast::Span) -> Result<Opcode, Error> {
-    todo!()
+    Opcode::from_str(ast_opcode.text).ok_or(Error {})
+}
+
+fn ast_operand_to_operand(ast_operand: &ast::Span) -> Result<SourceOperand, Error> {
+    // TODO support Imm operands
+    let variable = ast_variable_to_variable(ast_operand)?;
+    Ok(SourceOperand::Var(variable))
 }
 
 fn ast_map<T, U>(ast_items: &Vec<T>, f: fn(&T) -> Result<U, Error>) -> Result<Vec<U>, Error> {
@@ -98,4 +106,15 @@ fn ast_map<T, U>(ast_items: &Vec<T>, f: fn(&T) -> Result<U, Error>) -> Result<Ve
         items.push(f(ast_item)?);
     }
     Ok(items)
+}
+
+fn ast_map_option<T, U>(
+    ast_option: &Option<T>,
+    f: fn(&T) -> Result<U, Error>,
+) -> Result<Option<U>, Error> {
+    if let Some(ast_item) = ast_option {
+        Ok(Some(f(ast_item)?))
+    } else {
+        Ok(None)
+    }
 }

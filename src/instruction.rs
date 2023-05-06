@@ -1,6 +1,8 @@
 use crate::module::Variable;
 
-pub mod constructors;
+mod constructors;
+mod opcode;
+pub use opcode::Opcode;
 
 #[derive(Debug)]
 pub struct Instruction {
@@ -13,16 +15,6 @@ impl Instruction {
     pub fn operands(&self) -> impl Iterator<Item = &SourceOperand> {
         self.src.operands.iter()
     }
-}
-
-#[derive(Debug)]
-pub enum Opcode {
-    Store,
-    Load,
-    Jump,
-    Call,
-    Add,
-    Sub,
 }
 
 #[derive(Debug)]

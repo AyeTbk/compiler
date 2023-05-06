@@ -1,6 +1,6 @@
 use compiler_backend::{
     error_reporting::{convert_parser_error, report_error},
-    serialize,
+    serialize::{self, convert::ast_to_module},
 };
 
 fn main() {
@@ -14,5 +14,7 @@ fn main() {
         report_error(e);
     }
 
-    // dbg!(result.module);
+    let module = ast_to_module(&result.module).unwrap();
+
+    dbg!(module);
 }
