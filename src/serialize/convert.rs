@@ -8,16 +8,27 @@ use super::ast;
 pub mod error;
 pub use error::Error;
 
-// TODO potentially allow returning multiple errors
-pub fn ast_to_module(ast_module: &ast::Module) -> Result<Module, Error> {
+// TODO actual errors & allow returning multiple errors
+pub fn convert_ast(ast_module: &ast::Module) -> Result<Module, Error> {
+    ast_module_to_module(ast_module)
+}
+
+pub fn ast_module_to_module(ast_module: &ast::Module) -> Result<Module, Error> {
     let mut procedures = Vec::new();
 
     for ast_proc in &ast_module.procedures {
+        // FIXME handle entry block better
+
         let mut ast_blocks_iter = ast_proc.basic_blocks.iter();
-        let ast_entry_block = ast_blocks_iter.next().ok_or(Error {})?;
+        let ast_entry_block = ast_blocks_iter
+            .next()
+            .ok_or(Error::new("procedure has no blocks", &ast_proc.name))?;
 
         if !ast_entry_block.parameters.is_empty() {
-            return Err(Error {});
+            return Err(Error::new(
+                "entry block shouldn't have parameters",
+                &ast_entry_block.name,
+            ));
         }
 
         let entry_block = BasicBlock {
@@ -75,23 +86,44 @@ fn ast_instruction_to_instruction(
 }
 
 fn ast_variable_to_variable(ast_variable: &ast::Span) -> Result<Variable, Error> {
-    if let Some((kind_str, id_str)) = ast_variable.text.split_once(&['v', 'r', 's']) {
-        let id = id_str.parse::<u32>().map_err(|_| Error {})?;
-        let variable = match kind_str {
-            "v" => Variable::Virtual(id),
-            "r" => Variable::Register(id),
-            "s" => Variable::Stack(id),
-            _ => return Err(Error {}),
+    if let Some((_, id_str)) = ast_variable.text.split_once(&['v', 'r', 's']) {
+        let id = id_str.parse::<u32>().map_err(|_| {
+            Error::new(
+                format!(
+                    "invalid variable id `{}`, expected integer",
+                    ast_variable.text
+                ),
+                ast_variable,
+            )
+        })?;
+
+        let variable = if ast_variable.text.starts_with("v") {
+            Variable::Virtual(id)
+        } else if ast_variable.text.starts_with("r") {
+            Variable::Register(id)
+        } else if ast_variable.text.starts_with("s") {
+            Variable::Stack(id)
+        } else {
+            unreachable!("if this is actually reachable, rewrite this whole function plz");
         };
 
         Ok(variable)
     } else {
-        Err(Error {})
+        Err(Error::new(
+            format!(
+                "invalid variable kind `{}`, expected `v`, `r` or `s`",
+                ast_variable.text
+            ),
+            ast_variable,
+        ))
     }
 }
 
 fn ast_opcode_to_opcode(ast_opcode: &ast::Span) -> Result<Opcode, Error> {
-    Opcode::from_str(ast_opcode.text).ok_or(Error {})
+    Opcode::from_str(ast_opcode.text).ok_or(Error::new(
+        format!("unknown opcode `{}`", ast_opcode.text),
+        ast_opcode,
+    ))
 }
 
 fn ast_operand_to_operand(ast_operand: &ast::Span) -> Result<SourceOperand, Error> {

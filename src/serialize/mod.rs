@@ -2,7 +2,7 @@ pub mod ast;
 
 pub mod lexer;
 
-pub mod parser;
-pub use self::parser::Parser;
+pub mod parse;
+pub use self::parse::Parser;
 
 pub mod convert;
