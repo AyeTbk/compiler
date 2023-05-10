@@ -6,9 +6,13 @@ use super::lexer::{self, *};
 pub mod error;
 use error::*;
 
-pub const KEYWORDS: &'static [&'static str] = &["proc", "if"];
+const KEYWORDS: &'static [&'static str] = &["proc", "if"];
 
-pub struct Parser<'a> {
+pub fn parse<'a>(src: &'a str) -> ParsingResult<'a> {
+    Parser::new(src).parse()
+}
+
+struct Parser<'a> {
     tokens: Peekable<Lex<'a>>,
     errors: Vec<Error<'a>>,
 }

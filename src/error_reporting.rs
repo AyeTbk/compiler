@@ -1,6 +1,36 @@
 use crate::serialize::convert::error::Error as ConvertError;
 use crate::serialize::parse::error::Error as ParseError;
 
+pub enum Error<'a> {
+    Parse(ParseError<'a>),
+    Convert(ConvertError),
+}
+
+impl<'a> From<ParseError<'a>> for Error<'a> {
+    fn from(value: ParseError<'a>) -> Self {
+        Self::Parse(value)
+    }
+}
+
+impl<'a> From<ConvertError> for Error<'a> {
+    fn from(value: ConvertError) -> Self {
+        Self::Convert(value)
+    }
+}
+
+pub fn make_error_report<'a>(
+    error: impl Into<Error<'a>>,
+    source_name: &'a str,
+    source: &'a str,
+) -> ErrorReport {
+    match error.into() {
+        Error::Parse(parse_error) => make_parse_error_report(parse_error, source_name, source),
+        Error::Convert(convert_error) => {
+            make_convert_error_report(convert_error, source_name, source)
+        }
+    }
+}
+
 pub fn make_parse_error_report<'a>(
     parse_error: ParseError<'a>,
     source_name: &'a str,
