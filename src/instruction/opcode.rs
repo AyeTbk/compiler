@@ -29,12 +29,11 @@ macro_rules! define_opcodes {
                 None
             }
         }
-
-
     };
 }
 
 define_opcodes! {
+    InvalidOpcode,
     Store,
     Load,
     Jump,

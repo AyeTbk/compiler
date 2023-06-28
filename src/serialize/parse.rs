@@ -26,20 +26,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(mut self) -> ParsingResult<'a> {
-        let mut module = Module::default();
-
-        while self.tokens.peek().is_some() {
-            // let proc = match self.parse_proc() {
-            //     Ok(proc) => proc,
-            //     Err(err) => {
-            //         panic!("{:?}", err);
-            //         self.add_error(err);
-            //         break;
-            //     }
-            // };
-            let proc = self.parse_proc().unwrap();
-            module.procedures.push(proc);
-        }
+        let module = self.parse_module().unwrap();
 
         ParsingResult {
             module,
@@ -47,10 +34,36 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_module(&mut self) -> Result<Module<'a>, Error<'a>> {
+        let mut module = Module::default();
+
+        while self.tokens.peek().is_some() {
+            let proc = match self.parse_proc() {
+                Ok(proc) => proc,
+                Err(err) => {
+                    self.add_error(err);
+                    if self
+                        .try_recover([RecoveryStrategy::Keyword("proc")])
+                        .is_err()
+                    {
+                        // Having failed to recover, there is no choice but to give up on parsing.
+                        break;
+                    }
+                    continue;
+                }
+            };
+            module.procedures.push(proc);
+        }
+
+        Ok(module)
+    }
+
     fn parse_proc(&mut self) -> Result<Procedure<'a>, Error<'a>> {
         self.expect_keyword("proc")?;
 
-        let name = self.expect_token()?.span();
+        let name = self
+            .expect_any_alphanumeric(ExpectedKind::ProcedureName)?
+            .span();
         let parameters = self.parse_parameter_list()?;
 
         let mut return_typ = None;
@@ -191,6 +204,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_instruction_condition(&mut self) -> Result<Condition<'a>, Error<'a>> {
+        // TODO Handle just  if some_register;
         self.expect_keyword("if")?;
         let op1 = self.expect_any_alphanumeric(ExpectedKind::Operand)?.span();
         let operator = self.expect_any_keyword_of(&["==", "!="])?;
@@ -224,7 +238,7 @@ impl<'a> Parser<'a> {
                 Ok(item) => items.push(item),
                 Err(err) if err.is_recoverable() => {
                     self.add_error(err);
-                    self.recover([
+                    self.try_recover([
                         RecoveryStrategy::Keyword(sep),
                         RecoveryStrategy::MatchingPair {
                             open,
@@ -246,11 +260,20 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
-    fn recover<const N: usize>(
+    fn try_recover<const N: usize>(
         &mut self,
         mut strategies: [RecoveryStrategy; N],
     ) -> Result<(), Error<'a>> {
-        // returns such that the next token to be read will be one of the keywords. Error on EOF.
+        // Consume tokens until any of the given recovery strategy succeeds.
+        //   Keyword:
+        //     On successful recovery, the next token will be the given keyword.
+        //   Matching pair:
+        //     On successful recovery, the next token will be the one following
+        //      the balanced matching pair.
+        //     Make sure to set the value of the balance field such that it
+        //      represents how unbalanced the matching pair initally is.
+        //      A balance of 1 or greater indicates the pair is unbalanced.
+        // Error on EOF.
         'top: loop {
             for strategy in &mut strategies {
                 match strategy {
@@ -377,6 +400,6 @@ pub enum RecoveryStrategy {
 
 #[derive(Debug)]
 pub struct ParsingResult<'a> {
-    pub errors: Vec<Error<'a>>,
     pub module: Module<'a>,
+    pub errors: Vec<Error<'a>>,
 }

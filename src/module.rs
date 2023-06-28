@@ -83,6 +83,13 @@ pub enum Variable {
 }
 
 impl Variable {
+    pub fn as_stack(&self) -> Option<StackSlotId> {
+        match self {
+            Variable::Stack(id) => Some(*id),
+            _ => None,
+        }
+    }
+
     pub fn into_non_stack(self) -> Option<VariableNonStack> {
         match self {
             Self::Register(id) => Some(VariableNonStack::Register(id)),

@@ -8,6 +8,8 @@ pub enum InstructionConstraint {
     FirstOperandIsDestination,
 }
 
+/// TODO write up of what it is doing conceptually, so I can know what it's trying to do
+/// and why it's supposed to work...
 pub fn spillalloc(proc: &mut Procedure) {
     // 1. Handle block parameters
     Peephole::peep_blocks(proc, |ph, _, block| {
