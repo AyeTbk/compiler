@@ -15,7 +15,6 @@ macro_rules! define_opcodes {
             }
 
             pub const fn as_str(&self) -> &'static str {
-                // TODO find a satisfying way to make this lowercase instead of PascalCase
                 match self {
                     $(Self::$variant => stringify_lowercase!($variant)),*
                 }

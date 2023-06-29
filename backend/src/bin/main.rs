@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use compiler_backend::{
     error_reporting::{make_error_report, report_error},
     module::Module,
-    serialize::{self},
+    serialize,
 };
 
 fn main() -> ExitCode {
