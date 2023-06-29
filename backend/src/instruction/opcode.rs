@@ -1,3 +1,5 @@
+use macros::stringify_lowercase;
+
 macro_rules! define_opcodes {
     ($($variant:ident),* $(,)?) => {
         #[derive(Debug)]
@@ -15,7 +17,7 @@ macro_rules! define_opcodes {
             pub const fn as_str(&self) -> &'static str {
                 // TODO find a satisfying way to make this lowercase instead of PascalCase
                 match self {
-                    $(Self::$variant => stringify!($variant)),*
+                    $(Self::$variant => stringify_lowercase!($variant)),*
                 }
             }
 
