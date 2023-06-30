@@ -133,7 +133,7 @@ impl ConverterAstToModule {
 
         let mut stack_slots = Vec::new();
         for (i, ast_instruction) in ast_stack_block.instructions.iter().enumerate() {
-            let expected_id = (i + 1) as u32;
+            let expected_id = i as u32;
             stack_slots.push(Self::ast_instruction_to_stack_slot(
                 ast_instruction,
                 expected_id,

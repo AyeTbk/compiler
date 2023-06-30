@@ -88,7 +88,10 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
 
     fn serialize_parameter_list(&mut self, parameters: &[Parameter]) -> Result {
         self.write_str("(")?;
-        for parameter in parameters {
+        for (i, parameter) in parameters.iter().enumerate() {
+            if i != 0 {
+                self.write_str(", ")?;
+            }
             self.serialize_variable(&parameter.variable)?;
             self.serialize_type_annotation()?;
         }
