@@ -37,9 +37,9 @@ define_opcodes! {
     InvalidOpcode,
     Store,
     Load,
-    Jump,
     Call,
+    Ret,
+    Jump,
     Add,
     Sub,
-    Ret,
 }

@@ -12,6 +12,7 @@ pub struct Module {
 
 #[derive(Debug)]
 pub struct Procedure {
+    pub name: String,
     pub return_typ: Typ,
     pub basic_blocks: BasicBlocks,
     pub data: ProcedureData,
@@ -21,6 +22,18 @@ pub struct Procedure {
 pub struct BasicBlocks {
     pub entry: BasicBlock,
     pub others: Vec<BasicBlock>,
+}
+
+impl BasicBlocks {
+    pub fn iter(&mut self) -> impl Iterator<Item = &BasicBlock> {
+        Some(&self.entry).into_iter().chain(self.others.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut BasicBlock> {
+        Some(&mut self.entry)
+            .into_iter()
+            .chain(self.others.iter_mut())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -45,14 +58,6 @@ impl ProcedureData {
             .enumerate()
             .find(|(_, ss)| ss.allocated_for == variable)
             .map(|(i, _)| i as StackSlotId)
-    }
-}
-
-impl BasicBlocks {
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut BasicBlock> {
-        Some(&mut self.entry)
-            .into_iter()
-            .chain(self.others.iter_mut())
     }
 }
 
@@ -90,7 +95,7 @@ impl Variable {
         }
     }
 
-    pub fn into_non_stack(self) -> Option<VariableNonStack> {
+    pub fn to_non_stack(self) -> Option<VariableNonStack> {
         match self {
             Self::Register(id) => Some(VariableNonStack::Register(id)),
             Self::Virtual(id) => Some(VariableNonStack::Virtual(id)),
@@ -103,6 +108,15 @@ impl Variable {
 pub enum VariableNonStack {
     Virtual(VirtualId),
     Register(RegisterId),
+}
+
+impl VariableNonStack {
+    pub fn to_variable(&self) -> Variable {
+        match *self {
+            Self::Virtual(id) => Variable::Virtual(id),
+            Self::Register(id) => Variable::Register(id),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

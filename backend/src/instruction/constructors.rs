@@ -8,6 +8,8 @@ impl Instruction {
             opcode: Opcode::Store,
             src: SourceOperands::from_iter([SourceOperand::Var(src)]),
             dst: Some(Variable::Stack(dest)),
+            target_block: None,
+            cond: None,
         }
     }
 
@@ -16,6 +18,8 @@ impl Instruction {
             opcode: Opcode::Load,
             src: SourceOperands::from_iter([SourceOperand::Var(Variable::Stack(src))]),
             dst: Some(dest),
+            target_block: None,
+            cond: None,
         }
     }
 }

@@ -1,7 +1,9 @@
 use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
+use crate::instruction::Condition;
 use crate::module::StackSlot;
+use crate::serialize::ast::Span;
 use crate::{
     instruction::{Instruction, Opcode, SourceOperand, SourceOperands},
     module::{BasicBlock, BasicBlocks, Module, Parameter, Procedure, ProcedureData, Typ, Variable},
@@ -84,6 +86,7 @@ impl ConverterAstToModule {
         }
 
         let proc = Procedure {
+            name: ast_proc.name.text.to_string(),
             return_typ: Typ,
             basic_blocks: BasicBlocks {
                 entry: entry_block,
@@ -154,7 +157,7 @@ impl ConverterAstToModule {
         let allocated_for_var = Self::ast_variable_to_variable(&ast_instruction.opcode)?;
         Ok(StackSlot {
             allocated_for: allocated_for_var
-                .into_non_stack()
+                .to_non_stack()
                 .expect("must not be stack slot"),
             typ: Typ,
         })
@@ -176,7 +179,30 @@ impl ConverterAstToModule {
                 operands: ast_map(&ast_instruction.operands, Self::ast_operand_to_operand)?,
             },
             dst: ast_map_option(&ast_instruction.destination, Self::ast_variable_to_variable)?,
+            target_block: ast_map_option(
+                &ast_instruction.target_block,
+                Self::ast_target_block_to_target_block,
+            )?,
+            cond: ast_map_option(&ast_instruction.condition, Self::ast_condition_to_condition)?,
         })
+    }
+
+    fn ast_target_block_to_target_block(ast_target_block: &Span) -> Result<String, Error> {
+        Ok(ast_target_block.text.to_string())
+    }
+
+    fn ast_condition_to_condition(ast_condition: &ast::Condition) -> Result<Condition, Error> {
+        let condition = match ast_condition {
+            ast::Condition::Equals(a, b) => Condition::Equals(
+                Self::ast_operand_to_operand(a)?,
+                Self::ast_operand_to_operand(b)?,
+            ),
+            ast::Condition::NotEquals(a, b) => Condition::NotEquals(
+                Self::ast_operand_to_operand(a)?,
+                Self::ast_operand_to_operand(b)?,
+            ),
+        };
+        Ok(condition)
     }
 
     fn ast_operand_to_operand(ast_operand: &ast::Span) -> Result<SourceOperand, Error> {

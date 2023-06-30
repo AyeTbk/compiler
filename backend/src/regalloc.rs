@@ -16,7 +16,7 @@ pub fn spillalloc(proc: &mut Procedure) {
         //  allocate stack slot for all non-stack parameters.
         //  insert store(stack slot, parameter) for all non-stack parameters.
         for param in &block.parameters {
-            if let Some(non_stack_param_variable) = param.variable.into_non_stack() {
+            if let Some(non_stack_param_variable) = param.variable.to_non_stack() {
                 let stack_slot = ph.data.allocate_stack_slot_for(non_stack_param_variable);
                 ph.insert_before(0, Instruction::store(stack_slot, param.variable));
             }
@@ -29,7 +29,7 @@ pub fn spillalloc(proc: &mut Procedure) {
         //  allocate a stack slot for it
         //  insert store(stack slot, dest) after instruction.
         if let Some(dest) = instr.dst {
-            if let Some(dest_non_stack) = dest.into_non_stack() {
+            if let Some(dest_non_stack) = dest.to_non_stack() {
                 let stack_slot = ph.data.allocate_stack_slot_for(dest_non_stack);
                 ph.insert_before(0, Instruction::store(stack_slot, dest));
             }
@@ -46,7 +46,7 @@ pub fn spillalloc(proc: &mut Procedure) {
             }
 
             if let Some(operand_variable) = operand.to_variable() {
-                if let Some(operand_non_stack) = operand_variable.into_non_stack() {
+                if let Some(operand_non_stack) = operand_variable.to_non_stack() {
                     let stack_slot = ph
                         .data
                         .get_stack_slot_for(operand_non_stack)

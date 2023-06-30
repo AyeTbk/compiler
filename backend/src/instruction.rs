@@ -9,6 +9,8 @@ pub struct Instruction {
     pub opcode: Opcode,
     pub src: SourceOperands,
     pub dst: Option<Variable>,
+    pub target_block: Option<String>,
+    pub cond: Option<Condition>,
 }
 
 impl Instruction {
@@ -43,4 +45,10 @@ impl SourceOperand {
             _ => None,
         }
     }
+}
+
+#[derive(Debug)]
+pub enum Condition {
+    Equals(SourceOperand, SourceOperand),
+    NotEquals(SourceOperand, SourceOperand),
 }
