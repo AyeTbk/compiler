@@ -92,7 +92,10 @@ impl ConverterAstToModule {
                 entry: entry_block,
                 others: other_blocks,
             },
-            data: ProcedureData { stack_slots },
+            data: ProcedureData {
+                stack_slots,
+                highest_virtual_id: 1000, // FIXME actually get the highest id from the AST
+            },
         };
 
         Ok(proc)

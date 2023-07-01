@@ -15,6 +15,7 @@ pub fn parse<'a>(src: &'a str) -> ParsingResult<'a> {
 struct Parser<'a> {
     tokens: Peekable<Lex<'a>>,
     errors: Vec<Error<'a>>,
+    current_token: Option<Token<'a>>,
 }
 
 impl<'a> Parser<'a> {
@@ -22,6 +23,7 @@ impl<'a> Parser<'a> {
         Self {
             tokens: lex(src).peekable(),
             errors: vec![],
+            current_token: None,
         }
     }
 
@@ -82,7 +84,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_parameter_list(&mut self) -> Result<Vec<Parameter<'a>>, Error<'a>> {
-        self.parse_delimited_list(|p| p.parse_parameter(), "(", Some(","), ")")
+        self.parse_delimited_list(|p| p.parse_parameter(), "(", Between(","), ")")
     }
 
     fn parse_parameter(&mut self) -> Result<Parameter<'a>, Error<'a>> {
@@ -108,7 +110,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_proc_body(&mut self) -> Result<Vec<BasicBlock<'a>>, Error<'a>> {
-        self.parse_delimited_list(|this| this.parse_basic_block(), "{", None, "}")
+        self.parse_delimited_list(|this| this.parse_basic_block(), "{", Nothing, "}")
     }
 
     fn parse_basic_block(&mut self) -> Result<BasicBlock<'a>, Error<'a>> {
@@ -134,7 +136,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_basic_block_body(&mut self) -> Result<Vec<Instruction<'a>>, Error<'a>> {
-        self.parse_delimited_list(|this| this.parse_instruction(), "{", None, "}")
+        self.parse_delimited_list(|this| this.parse_instruction(), "{", After(";"), "}")
     }
 
     fn parse_instruction(&mut self) -> Result<Instruction<'a>, Error<'a>> {
@@ -170,8 +172,6 @@ impl<'a> Parser<'a> {
         if token.text == "if" {
             condition = Some(self.parse_instruction_condition()?);
         }
-
-        self.expect_keyword(";")?;
 
         Ok(Instruction {
             opcode,
@@ -222,13 +222,13 @@ impl<'a> Parser<'a> {
         &mut self,
         parse_item: impl Fn(&mut Self) -> Result<T, Error<'a>>,
         open: &'static str,
-        separator: Option<&'static str>,
+        separator: Separator,
         close: &'static str,
     ) -> Result<Vec<T>, Error<'a>> {
         // recovers on bad item, but if the list is bad, let the parent do the recovery
 
         // The lexer should not output tokens with empty text, so I'll use that to handle when caller doesn't want a separator.
-        let sep = separator.unwrap_or("");
+        let sep = separator.as_str();
 
         self.expect_keyword(open)?;
 
@@ -250,11 +250,31 @@ impl<'a> Parser<'a> {
                 Err(err) => return Err(err),
             }
 
-            // If the upcoming token doesn't end the list, expect a separator (if caller wants one).
-            if separator.is_some() && !self.predict_keyword(close)? {
-                self.expect_keyword(sep)?;
+            let sep_result = if separator.is_after() {
+                // Expect the separator if it's an After.
+                self.expect_keyword(sep)
+            } else if separator.is_between() && !self.predict_keyword(close)? {
+                // Expect the separator if it's a Between and the closing token isn't ahead.
+                // 'expect_any_keyword_of' is used just to offer a more descriptive error.
+                self.expect_any_keyword_of(&[sep, close])
+            } else {
+                Ok(Token::dummy())
+            };
+            if let Err(mut err) = sep_result {
+                err.from = self.current_token().span().to;
+                err.to = self.current_token().span().to + 1;
+                self.add_error(err);
+                self.try_recover([
+                    RecoveryStrategy::AfterKeyword(sep),
+                    RecoveryStrategy::MatchingPair {
+                        open,
+                        close,
+                        balance: 1,
+                    },
+                ])?;
             }
         }
+
         self.expect_keyword(close)?;
 
         Ok(items)
@@ -267,6 +287,9 @@ impl<'a> Parser<'a> {
         // Consume tokens until any of the given recovery strategy succeeds.
         //   Keyword:
         //     On successful recovery, the next token will be the given keyword.
+        //   AfterKeyword:
+        //     On successful recovery, the next token will be one directly
+        //      following the given keyword.
         //   Matching pair:
         //     On successful recovery, the next token will be the one following
         //      the balanced matching pair.
@@ -279,6 +302,12 @@ impl<'a> Parser<'a> {
                 match strategy {
                     RecoveryStrategy::Keyword(keyword) => {
                         if self.predict_keyword(keyword)? {
+                            break 'top;
+                        }
+                    }
+                    RecoveryStrategy::AfterKeyword(keyword) => {
+                        if self.predict_keyword(keyword)? {
+                            self.read_token();
                             break 'top;
                         }
                     }
@@ -304,8 +333,8 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn add_error(&mut self, error: Error<'a>) {
-        self.errors.push(error);
+    fn add_error(&mut self, err: Error<'a>) {
+        self.errors.push(err);
     }
 
     fn predict_keyword(&mut self, keyword: &'static str) -> Result<bool, Error<'a>> {
@@ -333,10 +362,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_any_keyword_of(
-        &mut self,
-        keywords: &'static [&'static str],
-    ) -> Result<Token<'a>, Error<'a>> {
+    fn expect_any_keyword_of(&mut self, keywords: &[&'static str]) -> Result<Token<'a>, Error<'a>> {
         // only consume token if it corresponds to keyword
         let token = self
             .predict_token()
@@ -359,6 +385,7 @@ impl<'a> Parser<'a> {
             self.read_token();
             Ok(token)
         } else {
+            dbg!(token);
             Err(Error::unexpected(what, token))
         }
     }
@@ -370,11 +397,47 @@ impl<'a> Parser<'a> {
 
     fn read_token(&mut self) -> Option<Token<'a>> {
         let token = self.tokens.next()?;
+        self.current_token = Some(token);
         Some(token)
     }
 
     fn peek_token(&mut self) -> Option<Token<'a>> {
         self.tokens.peek().map(|t| *t)
+    }
+
+    fn current_token(&self) -> Token<'a> {
+        self.current_token
+            .expect("this method shouldn't be called before reading/expecting a token")
+    }
+}
+
+enum Separator {
+    Nothing,
+    Between(&'static str), // Between and optionally after
+    After(&'static str),   // Always after
+}
+use Separator::*;
+impl Separator {
+    pub fn is_between(&self) -> bool {
+        match self {
+            Self::Between(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_after(&self) -> bool {
+        match self {
+            Self::After(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Nothing => "",
+            Self::Between(s) => s,
+            Self::After(s) => s,
+        }
     }
 }
 
@@ -388,9 +451,10 @@ impl<'a> lexer::Token<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RecoveryStrategy {
     Keyword(&'static str),
+    AfterKeyword(&'static str),
     MatchingPair {
         open: &'static str,
         close: &'static str,

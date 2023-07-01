@@ -8,8 +8,14 @@ pub enum InstructionConstraint {
     FirstOperandIsDestination,
 }
 
-/// TODO write up of what it is doing conceptually, so I can know what it's trying to do
-/// and why it's supposed to work...
+// Spill everything; that is, allocate everything on the stack.
+// The idea is: everytime a variable needs to be read, load it from its stack slot just
+// before use, and when a variable is written to, store it to its stack slot just after.
+// Block parameters need to be stored in their own stack slots aswell, so that following
+// instructions can safely blindly load them if needed.
+// Note: this is intended as a "generic" allocation scheme, the result still needs to go
+// through a proper register allocation pass for the intended output architecture.
+// FIXME SSA is not being respected right now
 pub fn spillalloc(proc: &mut Procedure) {
     // 1. Handle block parameters
     Peephole::peep_blocks(proc, |ph, _, block| {
@@ -25,13 +31,18 @@ pub fn spillalloc(proc: &mut Procedure) {
 
     // 2. Handle instructions
     Peephole::peep_instructions(proc, |ph, i, instr| {
+        match instr.opcode {
+            Opcode::Load | Opcode::Store => return,
+            _ => (),
+        }
+
         // If dest is some and not stack:
         //  allocate a stack slot for it
         //  insert store(stack slot, dest) after instruction.
         if let Some(dest) = instr.dst {
             if let Some(dest_non_stack) = dest.to_non_stack() {
                 let stack_slot = ph.data.allocate_stack_slot_for(dest_non_stack);
-                ph.insert_before(0, Instruction::store(stack_slot, dest));
+                ph.insert_after(i, Instruction::store(stack_slot, dest));
             }
         }
 
@@ -40,11 +51,6 @@ pub fn spillalloc(proc: &mut Procedure) {
         //  if operand is Virtual or Register, a stack slot should already be allocated for it by now, find it.
         //  insert load(original operand, stack slot) before instr.
         for operand in instr.operands() {
-            match instr.opcode {
-                Opcode::Load | Opcode::Store => (),
-                _ => continue,
-            }
-
             if let Some(operand_variable) = operand.to_variable() {
                 if let Some(operand_non_stack) = operand_variable.to_non_stack() {
                     let stack_slot = ph

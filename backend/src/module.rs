@@ -39,6 +39,7 @@ impl BasicBlocks {
 #[derive(Debug, Default)]
 pub struct ProcedureData {
     pub stack_slots: Vec<StackSlot>,
+    pub highest_virtual_id: VirtualId,
 }
 
 impl ProcedureData {
@@ -58,6 +59,11 @@ impl ProcedureData {
             .enumerate()
             .find(|(_, ss)| ss.allocated_for == variable)
             .map(|(i, _)| i as StackSlotId)
+    }
+
+    pub fn acquire_next_virtual_id(&mut self) -> VirtualId {
+        self.highest_virtual_id = self.highest_virtual_id.checked_add(1).unwrap();
+        self.highest_virtual_id
     }
 }
 

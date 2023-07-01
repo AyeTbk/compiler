@@ -6,6 +6,17 @@ pub struct Token<'a> {
     pub end: usize,
 }
 
+impl<'a> Token<'a> {
+    pub fn dummy() -> Self {
+        Self {
+            text: "",
+            kind: TokenKind::Token,
+            start: 0,
+            end: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Token,

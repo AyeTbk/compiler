@@ -60,7 +60,7 @@ impl<'a> Error<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpectedKind {
     Keyword(&'static str),
-    Keywords(&'static [&'static str]),
+    Keywords(Vec<&'static str>),
     ProcedureName,
     Block,
     BlockName,
@@ -77,9 +77,9 @@ impl From<&'static str> for ExpectedKind {
     }
 }
 
-impl From<&'static [&'static str]> for ExpectedKind {
-    fn from(value: &'static [&'static str]) -> Self {
-        Self::Keywords(value)
+impl From<&[&'static str]> for ExpectedKind {
+    fn from(value: &[&'static str]) -> Self {
+        Self::Keywords(value.to_vec())
     }
 }
 
