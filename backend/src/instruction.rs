@@ -9,13 +9,17 @@ pub struct Instruction {
     pub opcode: Opcode,
     pub src: SourceOperands,
     pub dst: Option<Variable>,
-    pub target_block: Option<TargetBlock>,
+    pub target_block: Option<String>,
     pub cond: Option<Condition>,
 }
 
 impl Instruction {
     pub fn operands(&self) -> impl Iterator<Item = &SourceOperand> {
         self.src.operands.iter()
+    }
+
+    pub fn operands_mut(&mut self) -> impl Iterator<Item = &mut SourceOperand> {
+        self.src.operands.iter_mut()
     }
 }
 
@@ -47,10 +51,10 @@ impl SourceOperand {
     }
 }
 
-#[derive(Debug)]
-pub struct TargetBlock {
-    pub name: String,
-    pub arguments: Vec<SourceOperand>,
+impl From<Variable> for SourceOperand {
+    fn from(value: Variable) -> Self {
+        Self::Var(value)
+    }
 }
 
 #[derive(Debug)]

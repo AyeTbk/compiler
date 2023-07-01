@@ -165,7 +165,11 @@ impl<'a> Parser<'a> {
             target_block = Some(self.parse_instruction_target_block()?);
             token = self.predict_token()?;
         }
-        if token.kind == TokenKind::Alphanumeric && !KEYWORDS.contains(&token.text) {
+
+        if target_block.is_none()
+            && token.kind == TokenKind::Alphanumeric
+            && !KEYWORDS.contains(&token.text)
+        {
             operands = self.parse_instruction_operands()?;
             token = self.predict_token()?;
         }

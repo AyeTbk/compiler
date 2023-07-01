@@ -105,26 +105,25 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         }
         self.write_str(instruction.opcode.as_str())?;
 
+        if let Some(target_block) = &instruction.target_block {
+            self.write_str(" #")?;
+            self.write_str(&target_block)?;
+            if !instruction.src.operands.is_empty() {
+                self.write_str("(")?;
+            }
+        } else {
+            self.write_str(" ")?;
+        }
+
         for (i, operand) in instruction.operands().enumerate() {
             if i != 0 {
                 self.write_str(", ")?;
-            } else {
-                self.write_str(" ")?;
             }
             self.serialize_operand(operand)?;
         }
 
-        if let Some(target_block) = &instruction.target_block {
-            self.write_str(" #")?;
-            self.write_str(&target_block.name)?;
-            if !target_block.arguments.is_empty() {
-                self.write_str("(")?;
-                for (i, argument) in target_block.arguments.iter().enumerate() {
-                    if i != 0 {
-                        self.write_str(", ")?;
-                    }
-                    self.serialize_operand(argument)?;
-                }
+        if instruction.target_block.is_some() {
+            if !instruction.src.operands.is_empty() {
                 self.write_str(")")?;
             }
         }

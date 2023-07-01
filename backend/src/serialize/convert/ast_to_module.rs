@@ -2,7 +2,6 @@ use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
 use crate::instruction::Condition;
-use crate::instruction::TargetBlock;
 use crate::module::StackSlot;
 use crate::{
     instruction::{Instruction, Opcode, SourceOperand, SourceOperands},
@@ -176,26 +175,24 @@ impl ConverterAstToModule {
     fn ast_instruction_to_instruction(
         ast_instruction: &ast::Instruction,
     ) -> Result<Instruction, Error> {
+        let (src, target_block) = if let Some(ast_target_block) = &ast_instruction.target_block {
+            let src = SourceOperands {
+                operands: ast_map(&ast_target_block.arguments, Self::ast_operand_to_operand)?,
+            };
+            (src, Some(ast_target_block.name.text.to_string()))
+        } else {
+            let src = SourceOperands {
+                operands: ast_map(&ast_instruction.operands, Self::ast_operand_to_operand)?,
+            };
+            (src, None)
+        };
+
         Ok(Instruction {
             opcode: Self::ast_opcode_to_opcode(&ast_instruction.opcode)?,
-            src: SourceOperands {
-                operands: ast_map(&ast_instruction.operands, Self::ast_operand_to_operand)?,
-            },
+            src,
             dst: ast_map_option(&ast_instruction.destination, Self::ast_variable_to_variable)?,
-            target_block: ast_map_option(
-                &ast_instruction.target_block,
-                Self::ast_target_block_to_target_block,
-            )?,
+            target_block,
             cond: ast_map_option(&ast_instruction.condition, Self::ast_condition_to_condition)?,
-        })
-    }
-
-    fn ast_target_block_to_target_block(
-        ast_target_block: &ast::TargetBlock,
-    ) -> Result<TargetBlock, Error> {
-        Ok(TargetBlock {
-            name: ast_target_block.name.text.to_string(),
-            arguments: ast_map(&ast_target_block.arguments, Self::ast_operand_to_operand)?,
         })
     }
 

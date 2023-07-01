@@ -1,6 +1,6 @@
 use crate::{
     instruction::{Instruction, Opcode},
-    module::Procedure,
+    module::{Procedure, Variable},
     utils::Peephole,
 };
 
@@ -47,17 +47,21 @@ pub fn spillalloc(proc: &mut Procedure) {
         }
 
         // For every operand:
-        //  dont do anything on loads / stores / stack variables.
+        //  Dont do anything on loads / stores / stack variables.
+        //  Make a new virtual variable.
         //  if operand is Virtual or Register, a stack slot should already be allocated for it by now, find it.
-        //  insert load(original operand, stack slot) before instr.
-        for operand in instr.operands() {
+        //  Insert load(new variable, stack slot) before instr.
+        //  Change the instr to make it use the new variable.
+        for operand in instr.operands_mut() {
             if let Some(operand_variable) = operand.to_variable() {
                 if let Some(operand_non_stack) = operand_variable.to_non_stack() {
                     let stack_slot = ph
                         .data
                         .get_stack_slot_for(operand_non_stack)
                         .expect("stack slot should already be allocated");
-                    ph.insert_before(i, Instruction::load(operand_variable, stack_slot));
+                    let new_variable = Variable::Virtual(ph.data.acquire_next_virtual_id());
+                    ph.insert_before(i, Instruction::load(new_variable, stack_slot));
+                    *operand = new_variable.into();
                 }
             }
         }
