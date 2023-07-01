@@ -9,7 +9,7 @@ pub struct Instruction {
     pub opcode: Opcode,
     pub src: SourceOperands,
     pub dst: Option<Variable>,
-    pub target_block: Option<String>,
+    pub target_block: Option<TargetBlock>,
     pub cond: Option<Condition>,
 }
 
@@ -45,6 +45,12 @@ impl SourceOperand {
             _ => None,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct TargetBlock {
+    pub name: String,
+    pub arguments: Vec<SourceOperand>,
 }
 
 #[derive(Debug)]

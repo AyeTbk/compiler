@@ -182,12 +182,27 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_instruction_target_block(&mut self) -> Result<Span<'a>, Error<'a>> {
+    fn parse_instruction_target_block(&mut self) -> Result<TargetBlock<'a>, Error<'a>> {
         self.expect_keyword("#")?;
-        let target_block_name = self
+        let name = self
             .expect_any_alphanumeric(ExpectedKind::BlockName)?
             .span();
-        Ok(target_block_name)
+
+        let arguments = if self.predict_keyword("(")? {
+            self.parse_delimited_list(
+                |this| {
+                    this.expect_any_alphanumeric(ExpectedKind::RegisterName)
+                        .map(|token| token.span())
+                },
+                "(",
+                Between(","),
+                ")",
+            )?
+        } else {
+            Vec::new()
+        };
+
+        Ok(TargetBlock { name, arguments })
     }
 
     fn parse_instruction_operands(&mut self) -> Result<Vec<Span<'a>>, Error<'a>> {

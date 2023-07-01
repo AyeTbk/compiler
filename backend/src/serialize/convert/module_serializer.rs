@@ -72,11 +72,11 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     }
 
     fn serialize_basic_block(&mut self, basic_block: &BasicBlock, is_entry: bool) -> Result {
-        self.write_fmt(format_args!("{} ", basic_block.name))?;
+        self.write_fmt(format_args!("{}", basic_block.name))?;
         if !is_entry {
             self.serialize_parameter_list(&basic_block.parameters)?;
-            self.write_str(" ")?;
         }
+        self.write_str(" ")?;
         self.block(|this| {
             for instruction in basic_block.instructions.iter() {
                 this.serialize_instruction(instruction)?;
@@ -115,8 +115,18 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         }
 
         if let Some(target_block) = &instruction.target_block {
-            self.write_str(" ")?;
-            self.write_fmt(format_args!("#{target_block}"))?;
+            self.write_str(" #")?;
+            self.write_str(&target_block.name)?;
+            if !target_block.arguments.is_empty() {
+                self.write_str("(")?;
+                for (i, argument) in target_block.arguments.iter().enumerate() {
+                    if i != 0 {
+                        self.write_str(", ")?;
+                    }
+                    self.serialize_operand(argument)?;
+                }
+                self.write_str(")")?;
+            }
         }
 
         if let Some(cond) = &instruction.cond {

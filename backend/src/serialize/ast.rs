@@ -29,8 +29,14 @@ pub struct Instruction<'a> {
     pub opcode: Span<'a>,
     pub operands: Vec<Span<'a>>,
     pub destination: Option<Span<'a>>,
-    pub target_block: Option<Span<'a>>,
+    pub target_block: Option<TargetBlock<'a>>,
     pub condition: Option<Condition<'a>>,
+}
+
+#[derive(Debug)]
+pub struct TargetBlock<'a> {
+    pub name: Span<'a>,
+    pub arguments: Vec<Span<'a>>,
 }
 
 #[derive(Debug)]

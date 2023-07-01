@@ -2,8 +2,8 @@ use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
 use crate::instruction::Condition;
+use crate::instruction::TargetBlock;
 use crate::module::StackSlot;
-use crate::serialize::ast::Span;
 use crate::{
     instruction::{Instruction, Opcode, SourceOperand, SourceOperands},
     module::{BasicBlock, BasicBlocks, Module, Parameter, Procedure, ProcedureData, Typ, Variable},
@@ -190,8 +190,13 @@ impl ConverterAstToModule {
         })
     }
 
-    fn ast_target_block_to_target_block(ast_target_block: &Span) -> Result<String, Error> {
-        Ok(ast_target_block.text.to_string())
+    fn ast_target_block_to_target_block(
+        ast_target_block: &ast::TargetBlock,
+    ) -> Result<TargetBlock, Error> {
+        Ok(TargetBlock {
+            name: ast_target_block.name.text.to_string(),
+            arguments: ast_map(&ast_target_block.arguments, Self::ast_operand_to_operand)?,
+        })
     }
 
     fn ast_condition_to_condition(ast_condition: &ast::Condition) -> Result<Condition, Error> {
