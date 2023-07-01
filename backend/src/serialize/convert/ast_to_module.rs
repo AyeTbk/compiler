@@ -214,9 +214,16 @@ impl ConverterAstToModule {
     }
 
     fn ast_operand_to_operand(ast_operand: &ast::Span) -> Result<SourceOperand, Error> {
-        // TODO support Imm operands
-        let variable = Self::ast_variable_to_variable(ast_operand)?;
-        Ok(SourceOperand::Var(variable))
+        if ast_operand.text.chars().all(char::is_numeric) {
+            let imm = ast_operand
+                .text
+                .parse()
+                .map_err(|_| Error::new("failed to parse immediate value", ast_operand))?;
+            Ok(SourceOperand::Imm(imm))
+        } else {
+            let variable = Self::ast_variable_to_variable(ast_operand)?;
+            Ok(SourceOperand::Var(variable))
+        }
     }
 
     fn ast_variable_to_variable(ast_variable: &ast::Span) -> Result<Variable, Error> {

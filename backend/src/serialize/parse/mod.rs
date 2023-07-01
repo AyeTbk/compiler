@@ -295,23 +295,23 @@ impl<'a> Parser<'a> {
         Ok(items)
     }
 
+    /// Consume tokens until any of the given recovery strategy succeeds.
+    ///   Keyword:
+    ///     On successful recovery, the next token will be the given keyword.
+    ///   AfterKeyword:
+    ///     On successful recovery, the next token will be one directly
+    ///      following the given keyword.
+    ///   Matching pair:
+    ///     On successful recovery, the next token will be the one following
+    ///      the balanced matching pair.
+    ///     Make sure to set the value of the balance field such that it
+    ///      represents how unbalanced the matching pair initally is.
+    ///      A balance of 1 or greater indicates the pair is unbalanced.
+    /// Error on EOF.
     fn try_recover<const N: usize>(
         &mut self,
         mut strategies: [RecoveryStrategy; N],
     ) -> Result<(), Error<'a>> {
-        // Consume tokens until any of the given recovery strategy succeeds.
-        //   Keyword:
-        //     On successful recovery, the next token will be the given keyword.
-        //   AfterKeyword:
-        //     On successful recovery, the next token will be one directly
-        //      following the given keyword.
-        //   Matching pair:
-        //     On successful recovery, the next token will be the one following
-        //      the balanced matching pair.
-        //     Make sure to set the value of the balance field such that it
-        //      represents how unbalanced the matching pair initally is.
-        //      A balance of 1 or greater indicates the pair is unbalanced.
-        // Error on EOF.
         'top: loop {
             for strategy in &mut strategies {
                 match strategy {

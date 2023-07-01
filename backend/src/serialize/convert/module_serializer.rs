@@ -157,7 +157,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     fn serialize_operand(&mut self, operand: &SourceOperand) -> Result {
         match operand {
             SourceOperand::Var(var) => self.serialize_variable(var),
-            _ => unimplemented!("imm operand"),
+            SourceOperand::Imm(imm) => self.write_fmt(format_args!("{}", imm)),
         }
     }
 
