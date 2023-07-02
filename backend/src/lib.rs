@@ -1,6 +1,7 @@
 pub mod error_reporting;
 pub mod instruction;
 pub mod module;
+pub mod passes;
 pub mod regalloc;
 pub mod serialize;
 pub mod utils;

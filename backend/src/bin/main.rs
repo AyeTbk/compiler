@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use compiler_backend::{
     error_reporting::{make_error_report, report_error},
     module::Module,
-    regalloc::spillalloc,
+    passes::stack::{generate_loads_stores, spill_all_virtual, stack_call_conv},
     serialize::{self, convert::convert_module_to_string},
 };
 
@@ -42,7 +42,9 @@ fn main() -> ExitCode {
 
 fn handle_module(mut module: Module) {
     for proc in &mut module.procedures {
-        spillalloc(proc);
+        stack_call_conv(proc);
+        spill_all_virtual(proc);
+        generate_loads_stores(proc);
     }
     let s = convert_module_to_string(&module);
     println!("{}", s);

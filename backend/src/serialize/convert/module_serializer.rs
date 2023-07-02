@@ -1,7 +1,7 @@
 use std::fmt::{Arguments, Error as FmtError, Write};
 
 use crate::{
-    instruction::{Condition, Instruction, SourceOperand},
+    instruction::{Condition, Instruction, Operand},
     module::{BasicBlock, Module, Parameter, Procedure, StackSlot, Variable},
 };
 
@@ -153,10 +153,10 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         Ok(())
     }
 
-    fn serialize_operand(&mut self, operand: &SourceOperand) -> Result {
+    fn serialize_operand(&mut self, operand: &Operand) -> Result {
         match operand {
-            SourceOperand::Var(var) => self.serialize_variable(var),
-            SourceOperand::Imm(imm) => self.write_fmt(format_args!("{}", imm)),
+            Operand::Var(var) => self.serialize_variable(var),
+            Operand::Imm(imm) => self.write_fmt(format_args!("{}", imm)),
         }
     }
 

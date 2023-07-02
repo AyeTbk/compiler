@@ -61,6 +61,10 @@ impl ProcedureData {
             .map(|(i, _)| i as StackSlotId)
     }
 
+    pub fn acquire_new_virtual_variable(&mut self) -> Variable {
+        Variable::Virtual(self.acquire_next_virtual_id())
+    }
+
     pub fn acquire_next_virtual_id(&mut self) -> VirtualId {
         self.highest_virtual_id = self.highest_virtual_id.checked_add(1).unwrap();
         self.highest_virtual_id
@@ -80,13 +84,13 @@ pub struct BasicBlock {
     pub instructions: Vec<Instruction>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Parameter {
     pub variable: Variable,
     pub typ: Typ,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Variable {
     Virtual(VirtualId),
     Register(RegisterId),
@@ -94,6 +98,13 @@ pub enum Variable {
 }
 
 impl Variable {
+    pub fn is_virtual(&self) -> bool {
+        match self {
+            Variable::Virtual(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn as_stack(&self) -> Option<StackSlotId> {
         match self {
             Variable::Stack(id) => Some(*id),

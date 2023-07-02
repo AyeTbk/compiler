@@ -14,22 +14,22 @@ pub struct Instruction {
 }
 
 impl Instruction {
-    pub fn operands(&self) -> impl Iterator<Item = &SourceOperand> {
+    pub fn operands(&self) -> impl Iterator<Item = &Operand> {
         self.src.operands.iter()
     }
 
-    pub fn operands_mut(&mut self) -> impl Iterator<Item = &mut SourceOperand> {
+    pub fn operands_mut(&mut self) -> impl Iterator<Item = &mut Operand> {
         self.src.operands.iter_mut()
     }
 }
 
 #[derive(Debug)]
 pub struct SourceOperands {
-    pub operands: Vec<SourceOperand>,
+    pub operands: Vec<Operand>,
 }
 
-impl FromIterator<SourceOperand> for SourceOperands {
-    fn from_iter<T: IntoIterator<Item = SourceOperand>>(iter: T) -> Self {
+impl FromIterator<Operand> for SourceOperands {
+    fn from_iter<T: IntoIterator<Item = Operand>>(iter: T) -> Self {
         Self {
             operands: iter.into_iter().collect(),
         }
@@ -37,12 +37,12 @@ impl FromIterator<SourceOperand> for SourceOperands {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum SourceOperand {
+pub enum Operand {
     Var(Variable),
     Imm(u32),
 }
 
-impl SourceOperand {
+impl Operand {
     pub fn to_variable(self) -> Option<Variable> {
         match self {
             Self::Var(var) => Some(var),
@@ -51,7 +51,7 @@ impl SourceOperand {
     }
 }
 
-impl From<Variable> for SourceOperand {
+impl From<Variable> for Operand {
     fn from(value: Variable) -> Self {
         Self::Var(value)
     }
@@ -59,6 +59,15 @@ impl From<Variable> for SourceOperand {
 
 #[derive(Debug)]
 pub enum Condition {
-    Equals(SourceOperand, SourceOperand),
-    NotEquals(SourceOperand, SourceOperand),
+    Equals(Operand, Operand),
+    NotEquals(Operand, Operand),
+}
+
+impl Condition {
+    pub fn operands_mut(&mut self) -> impl Iterator<Item = &mut Operand> {
+        match self {
+            Self::Equals(a, b) => [a, b].into_iter(),
+            Self::NotEquals(a, b) => [a, b].into_iter(),
+        }
+    }
 }

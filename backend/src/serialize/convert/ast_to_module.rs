@@ -4,7 +4,7 @@ use super::Error;
 use crate::instruction::Condition;
 use crate::module::StackSlot;
 use crate::{
-    instruction::{Instruction, Opcode, SourceOperand, SourceOperands},
+    instruction::{Instruction, Opcode, Operand, SourceOperands},
     module::{BasicBlock, BasicBlocks, Module, Parameter, Procedure, ProcedureData, Typ, Variable},
 };
 
@@ -210,16 +210,16 @@ impl ConverterAstToModule {
         Ok(condition)
     }
 
-    fn ast_operand_to_operand(ast_operand: &ast::Span) -> Result<SourceOperand, Error> {
+    fn ast_operand_to_operand(ast_operand: &ast::Span) -> Result<Operand, Error> {
         if ast_operand.text.chars().all(char::is_numeric) {
             let imm = ast_operand
                 .text
                 .parse()
                 .map_err(|_| Error::new("failed to parse immediate value", ast_operand))?;
-            Ok(SourceOperand::Imm(imm))
+            Ok(Operand::Imm(imm))
         } else {
             let variable = Self::ast_variable_to_variable(ast_operand)?;
-            Ok(SourceOperand::Var(variable))
+            Ok(Operand::Var(variable))
         }
     }
 
