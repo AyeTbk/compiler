@@ -112,7 +112,14 @@ impl ConverterAstToModule {
 
         let mut instructions = Vec::new();
         for ast_instruction in &ast_block.instructions {
-            instructions.push(Self::ast_instruction_to_instruction(ast_instruction)?);
+            let instr = match Self::ast_instruction_to_instruction(ast_instruction) {
+                Ok(instr) => instr,
+                Err(err) => {
+                    self.add_error(err);
+                    Instruction::invalid()
+                }
+            };
+            instructions.push(instr);
         }
 
         Ok(BasicBlock {
@@ -264,8 +271,8 @@ impl ConverterAstToModule {
         ))
     }
 
-    fn add_error(&mut self, error: Error) {
-        self.errors.push(error);
+    fn add_error(&mut self, err: Error) {
+        self.errors.push(err);
     }
 }
 

@@ -3,6 +3,16 @@ use crate::module::{StackSlotId, Variable};
 use super::{Instruction, Opcode, Operand, SourceOperands};
 
 impl Instruction {
+    pub fn invalid() -> Instruction {
+        Self {
+            opcode: Opcode::InvalidInstruction,
+            src: SourceOperands::none(),
+            dst: None,
+            target_block: None,
+            cond: None,
+        }
+    }
+
     pub fn store(dest: StackSlotId, src: Variable) -> Instruction {
         Self {
             opcode: Opcode::Store,

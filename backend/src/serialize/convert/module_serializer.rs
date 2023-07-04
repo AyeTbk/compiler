@@ -111,10 +111,11 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
             if !instruction.src.operands.is_empty() {
                 self.write_str("(")?;
             }
-        } else {
-            self.write_str(" ")?;
         }
 
+        if instruction.operands().count() > 0 {
+            self.write_str(" ")?;
+        }
         for (i, operand) in instruction.operands().enumerate() {
             if i != 0 {
                 self.write_str(", ")?;

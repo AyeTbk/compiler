@@ -34,7 +34,7 @@ macro_rules! define_opcodes {
 }
 
 define_opcodes! {
-    InvalidOpcode,
+    InvalidInstruction,
     Store,
     Load,
     Call,

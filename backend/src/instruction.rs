@@ -28,6 +28,14 @@ pub struct SourceOperands {
     pub operands: Vec<Operand>,
 }
 
+impl SourceOperands {
+    fn none() -> Self {
+        Self {
+            operands: Vec::new(),
+        }
+    }
+}
+
 impl FromIterator<Operand> for SourceOperands {
     fn from_iter<T: IntoIterator<Item = Operand>>(iter: T) -> Self {
         Self {
