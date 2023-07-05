@@ -2,7 +2,7 @@ use macros::stringify_lowercase;
 
 macro_rules! define_opcodes {
     ($($variant:ident),* $(,)?) => {
-        #[derive(Debug)]
+        #[derive(Debug, Clone, Copy)]
         pub enum Opcode {
             $($variant),*
         }

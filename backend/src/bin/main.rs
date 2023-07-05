@@ -5,6 +5,7 @@ use compiler_backend::{
     module::Module,
     passes::stack::{generate_loads_stores, spill_all_virtual, stack_call_conv},
     serialize::{self, convert::convert_module_to_string},
+    x86_64,
 };
 
 fn main() -> ExitCode {
@@ -45,8 +46,12 @@ fn handle_module(mut module: Module) {
         stack_call_conv(proc);
         spill_all_virtual(proc);
         generate_loads_stores(proc);
+        x86_64::regalloc::allocate_registers(proc);
     }
+
     let s = convert_module_to_string(&module);
+    // let s = x86_64::assembly::generate_assembly(&module);
+
     println!("{}", s);
 
     //dbg!(module);

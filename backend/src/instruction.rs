@@ -29,10 +29,14 @@ pub struct SourceOperands {
 }
 
 impl SourceOperands {
-    fn none() -> Self {
+    pub fn none() -> Self {
         Self {
             operands: Vec::new(),
         }
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Operand> {
+        self.operands.iter_mut()
     }
 }
 

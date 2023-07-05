@@ -113,7 +113,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
             }
         }
 
-        if instruction.operands().count() > 0 {
+        if instruction.operands().count() > 0 && instruction.target_block.is_none() {
             self.write_str(" ")?;
         }
         for (i, operand) in instruction.operands().enumerate() {

@@ -1,3 +1,3 @@
 pub enum InstructionConstraint {
-    FirstOperandIsDestination,
+    FirstOperandIsAlsoDestination,
 }

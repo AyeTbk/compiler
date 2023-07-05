@@ -1,5 +1,8 @@
 use crate::{instruction::Opcode, regalloc::InstructionConstraint};
 
+pub mod assembly;
+pub mod regalloc;
+
 #[repr(u32)]
 pub enum Register {
     Rax,
@@ -34,7 +37,7 @@ impl Isa {
 
     pub fn instruction_constraint(opcode: Opcode) -> Option<InstructionConstraint> {
         match opcode {
-            Opcode::Add | Opcode::Sub => Some(InstructionConstraint::FirstOperandIsDestination),
+            Opcode::Add | Opcode::Sub => Some(InstructionConstraint::FirstOperandIsAlsoDestination),
             _ => None,
         }
     }
