@@ -14,7 +14,7 @@ macro_rules! define_opcodes {
                 ]
             }
 
-            pub const fn as_str(&self) -> &'static str {
+            pub const fn to_str(&self) -> &'static str {
                 match self {
                     $(Self::$variant => stringify_lowercase!($variant)),*
                 }
@@ -22,7 +22,7 @@ macro_rules! define_opcodes {
 
             pub fn from_str(s: &str) -> Option<Self> {
                 $(
-                    if s.eq_ignore_ascii_case(Self::$variant.as_str()) {
+                    if s.eq_ignore_ascii_case(Self::$variant.to_str()) {
                         return Some(Self::$variant);
                     }
                 )*

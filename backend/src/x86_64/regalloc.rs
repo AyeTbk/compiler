@@ -9,7 +9,7 @@ use crate::{
 use super::Isa;
 
 pub fn allocate_registers(proc: &mut Procedure) {
-    let mut available_registers = Isa::registers().to_vec();
+    let mut available_registers = Isa::register_ids().to_vec();
     available_registers.reverse();
 
     let mut virtual_to_register: HashMap<Variable, Variable> = HashMap::new();

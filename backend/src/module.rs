@@ -3,7 +3,6 @@ use crate::instruction::Instruction;
 pub type VirtualId = u32;
 pub type RegisterId = u32;
 pub type StackSlotId = u32;
-pub type ImmediateId = u32;
 
 #[derive(Debug, Default)]
 pub struct Module {
@@ -25,7 +24,7 @@ pub struct BasicBlocks {
 }
 
 impl BasicBlocks {
-    pub fn iter(&mut self) -> impl Iterator<Item = &BasicBlock> {
+    pub fn iter(&self) -> impl Iterator<Item = &BasicBlock> {
         Some(&self.entry).into_iter().chain(self.others.iter())
     }
 
@@ -59,6 +58,14 @@ impl ProcedureData {
             .enumerate()
             .find(|(_, ss)| ss.allocated_for == variable)
             .map(|(i, _)| i as StackSlotId)
+    }
+
+    pub fn total_stack_size(&self) -> u64 {
+        (self.stack_slots.len() * std::mem::size_of::<u32>()) as u64
+    }
+
+    pub fn stack_slot_memory_offset(&self, stack_slot: StackSlotId) -> u64 {
+        ((stack_slot as usize + 1) * std::mem::size_of::<u32>()) as u64
     }
 
     pub fn acquire_new_virtual_variable(&mut self) -> Variable {

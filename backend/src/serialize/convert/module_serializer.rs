@@ -103,7 +103,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
             self.serialize_variable(dst)?;
             self.write_str(" = ")?;
         }
-        self.write_str(instruction.opcode.as_str())?;
+        self.write_str(instruction.opcode.to_str())?;
 
         if let Some(target_block) = &instruction.target_block {
             self.write_str(" #")?;

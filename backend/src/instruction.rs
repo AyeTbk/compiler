@@ -55,6 +55,13 @@ pub enum Operand {
 }
 
 impl Operand {
+    pub fn is_immediate(self) -> bool {
+        match self {
+            Self::Imm(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn to_variable(self) -> Option<Variable> {
         match self {
             Self::Var(var) => Some(var),
@@ -76,10 +83,17 @@ pub enum Condition {
 }
 
 impl Condition {
-    pub fn operands_mut(&mut self) -> impl Iterator<Item = &mut Operand> {
+    pub fn operands(&self) -> [Operand; 2] {
         match self {
-            Self::Equals(a, b) => [a, b].into_iter(),
-            Self::NotEquals(a, b) => [a, b].into_iter(),
+            Self::Equals(a, b) => [*a, *b],
+            Self::NotEquals(a, b) => [*a, *b],
+        }
+    }
+
+    pub fn operands_mut(&mut self) -> [&mut Operand; 2] {
+        match self {
+            Self::Equals(a, b) => [a, b],
+            Self::NotEquals(a, b) => [a, b],
         }
     }
 }
