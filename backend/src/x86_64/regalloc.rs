@@ -14,7 +14,7 @@ pub fn allocate_registers(proc: &mut Procedure) {
 
     let mut virtual_to_register: HashMap<Variable, Variable> = HashMap::new();
 
-    for block in proc.basic_blocks.iter_mut() {
+    for block in proc.blocks.iter_mut() {
         for instr in &mut block.instructions {
             let constraint = Isa::instruction_constraint(instr.opcode);
             let first_operand_is_also_dst = matches!(

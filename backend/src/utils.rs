@@ -1,6 +1,6 @@
 use crate::{
     instruction::Instruction,
-    module::{BasicBlock, Procedure, ProcedureData},
+    module::{Block, Procedure, ProcedureData},
 };
 
 pub struct Peephole<'a> {
@@ -13,7 +13,7 @@ impl<'a> Peephole<'a> {
         proc: &'a mut Procedure,
         mut peeper: impl FnMut(&mut Peephole, usize, &mut Instruction),
     ) {
-        let blocks = &mut proc.basic_blocks;
+        let blocks = &mut proc.blocks;
         let mut peephole = Self {
             inserter: Default::default(),
             data: &mut proc.data,
@@ -29,9 +29,9 @@ impl<'a> Peephole<'a> {
 
     pub fn peep_blocks(
         proc: &'a mut Procedure,
-        mut peeper: impl FnMut(&mut Peephole, usize, &mut BasicBlock),
+        mut peeper: impl FnMut(&mut Peephole, usize, &mut Block),
     ) {
-        let blocks = &mut proc.basic_blocks;
+        let blocks = &mut proc.blocks;
         let mut peephole = Self {
             inserter: Default::default(),
             data: &mut proc.data,
@@ -69,7 +69,7 @@ impl InstructionInserter {
         self.inserts.push((after_idx, instr));
     }
 
-    pub fn apply(mut self, block: &mut BasicBlock) {
+    pub fn apply(mut self, block: &mut Block) {
         self.inserts.sort_by_key(|(idx, _)| *idx);
         self.inserts.reverse();
         for (idx, instr) in self.inserts {

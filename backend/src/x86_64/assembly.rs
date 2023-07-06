@@ -1,6 +1,6 @@
 use crate::{
     instruction::{Condition, Instruction, Opcode, Operand},
-    module::{BasicBlock, Module, Procedure, Variable},
+    module::{Block, Module, Procedure, Variable},
 };
 
 use super::Isa;
@@ -46,7 +46,7 @@ fn generate_proc_assembly(proc: &Procedure, buf: &mut String) {
 
     generate_proc_prologue(proc, buf);
 
-    for block in proc.basic_blocks.iter() {
+    for block in proc.blocks.iter() {
         generate_block_assembly(proc, block, buf);
     }
 
@@ -58,7 +58,7 @@ fn generate_proc_prologue(proc: &Procedure, buf: &mut String) {
     buf.push_str("    movq %rsp, %rbp\n");
     buf.push_str(&format!(
         "    subq ${}, %rsp\n",
-        proc.data.total_stack_size()
+        proc.data.combined_local_stack_slots_size()
     ));
 }
 
@@ -68,7 +68,7 @@ fn generate_proc_epilogue(_proc: &Procedure, buf: &mut String) {
     buf.push_str("    jmp _handle_fallthrough\n");
 }
 
-fn generate_block_assembly(proc: &Procedure, block: &BasicBlock, buf: &mut String) {
+fn generate_block_assembly(proc: &Procedure, block: &Block, buf: &mut String) {
     if block.name != "entry" {
         let block_label = make_block_label(proc, &block.name);
         buf.push_str(&format!("{}:\n", block_label));
@@ -81,7 +81,7 @@ fn generate_block_assembly(proc: &Procedure, block: &BasicBlock, buf: &mut Strin
 
 fn generate_instruction_assembly(
     proc: &Procedure,
-    block: &BasicBlock,
+    block: &Block,
     instr: &Instruction,
     buf: &mut String,
 ) {
@@ -133,7 +133,7 @@ fn generate_binary_instruction(proc: &Procedure, instr: &Instruction, buf: &mut 
     buf.push_str("\n");
 }
 
-fn generate_jump(proc: &Procedure, _block: &BasicBlock, instr: &Instruction, buf: &mut String) {
+fn generate_jump(proc: &Procedure, _block: &Block, instr: &Instruction, buf: &mut String) {
     if let Some(cond) = instr.cond.as_ref() {
         buf.push_str("    testq ");
         let [a, b] = cond.operands();

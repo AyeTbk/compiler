@@ -68,18 +68,20 @@ impl<'a> Parser<'a> {
             .span();
         let parameters = self.parse_parameter_list()?;
 
-        let mut return_typ = None;
-        if self.predict_keyword(":")? {
-            return_typ = Some(self.parse_typ_annotation()?);
-        }
+        let returns = if self.predict_keyword("->")? {
+            self.read_token();
+            self.parse_parameter_list()?
+        } else {
+            vec![]
+        };
 
-        let basic_blocks = self.parse_proc_body()?;
+        let blocks = self.parse_proc_body()?;
 
         Ok(Procedure {
             name,
             parameters,
-            return_typ,
-            basic_blocks,
+            returns,
+            blocks,
         })
     }
 
@@ -109,11 +111,11 @@ impl<'a> Parser<'a> {
         Ok(typ_token.span())
     }
 
-    fn parse_proc_body(&mut self) -> Result<Vec<BasicBlock<'a>>, Error<'a>> {
-        self.parse_delimited_list(|this| this.parse_basic_block(), "{", Nothing, "}")
+    fn parse_proc_body(&mut self) -> Result<Vec<Block<'a>>, Error<'a>> {
+        self.parse_delimited_list(|this| this.parse_block(), "{", Nothing, "}")
     }
 
-    fn parse_basic_block(&mut self) -> Result<BasicBlock<'a>, Error<'a>> {
+    fn parse_block(&mut self) -> Result<Block<'a>, Error<'a>> {
         let name = self
             .expect_any_alphanumeric(ExpectedKind::BlockName)?
             .span();
@@ -126,16 +128,16 @@ impl<'a> Parser<'a> {
             "{" => (),
             _ => return Err(Error::unexpected(ExpectedKind::Block, token)),
         }
-        let instructions = self.parse_basic_block_body()?;
+        let instructions = self.parse_block_body()?;
 
-        Ok(BasicBlock {
+        Ok(Block {
             name,
             parameters,
             instructions,
         })
     }
 
-    fn parse_basic_block_body(&mut self) -> Result<Vec<Instruction<'a>>, Error<'a>> {
+    fn parse_block_body(&mut self) -> Result<Vec<Instruction<'a>>, Error<'a>> {
         self.parse_delimited_list(|this| this.parse_instruction(), "{", After(";"), "}")
     }
 

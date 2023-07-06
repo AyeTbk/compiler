@@ -6,24 +6,28 @@ use crate::{
     utils::Peephole,
 };
 
-pub fn stack_call_conv(proc: &mut Procedure) {
+pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
     // NOTE: Loads and Stores will be handled by another pass.
 
     // Allocate a stack slot for every proc parameter.
     // Only support virtual variables, panic on non virtual variables.
     // Replace every proc parameter with the allocated stack variable.
     let mut new_stack_vars = HashMap::new();
-    for param in &mut proc.basic_blocks.entry.parameters {
+    for param in &mut proc.parameters {
         if !param.variable.is_virtual() {
             unimplemented!("non virtual variables not supported");
         }
 
-        let param_stack_slot = proc
-            .data
-            .allocate_stack_slot_for(param.variable.to_non_stack().unwrap());
+        let param_stack_slot = proc.data.allocate_caller_stack_slot();
         let param_stack_var = Variable::Stack(param_stack_slot);
         new_stack_vars.insert(param.variable, param_stack_var);
         param.variable = param_stack_var;
+    }
+
+    for ret in &mut proc.returns {
+        let ret_stack_slot = proc.data.allocate_caller_stack_slot();
+        let ret_stack_var = Variable::Stack(ret_stack_slot);
+        ret.variable = ret_stack_var;
     }
 
     // Modify every use of the proc parameters so they use the stack variable.
@@ -60,7 +64,7 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
                 if param.variable.is_virtual() {
                     let stack_slot = ph
                         .data
-                        .allocate_stack_slot_for(param.variable.to_non_stack().unwrap());
+                        .allocate_local_stack_slot_for(param.variable.to_non_stack().unwrap());
                     let stack_var = Variable::Stack(stack_slot);
                     new_stack_vars.insert(param.variable, Some(stack_var));
                     param.variable = stack_var;
@@ -83,7 +87,7 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
             if dest_var.is_virtual() {
                 let stack_slot = ph
                     .data
-                    .allocate_stack_slot_for(dest_var.to_non_stack().unwrap());
+                    .allocate_local_stack_slot_for(dest_var.to_non_stack().unwrap());
                 let stack_var = Variable::Stack(stack_slot);
                 new_stack_vars.insert(*dest_var, Some(stack_var));
                 *dest_var = stack_var;
@@ -134,7 +138,7 @@ pub fn generate_loads_stores(proc: &mut Procedure) {
     //        instruction. Remember what virtual var maps to what stack var for later substitutions.
     //   - handle condition operands like non jump instr operand above.
     let mut block_parameters = HashMap::new();
-    for block in proc.basic_blocks.iter() {
+    for block in proc.blocks.iter() {
         block_parameters.insert(block.name.clone(), block.parameters.clone());
     }
 

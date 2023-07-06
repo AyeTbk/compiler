@@ -3,9 +3,10 @@ use super::ConvertAstToModuleResult;
 use super::Error;
 use crate::instruction::Condition;
 use crate::module::StackSlot;
+use crate::module::StackSlotKind;
 use crate::{
     instruction::{Instruction, Opcode, Operand, SourceOperands},
-    module::{BasicBlock, BasicBlocks, Module, Parameter, Procedure, ProcedureData, Typ, Variable},
+    module::{Block, Blocks, Module, Parameter, Procedure, ProcedureData, Typ, Variable},
 };
 
 pub struct ConverterAstToModule {
@@ -46,12 +47,12 @@ impl ConverterAstToModule {
     fn ast_proc_to_proc(&mut self, ast_proc: &ast::Procedure) -> Result<Procedure, Error> {
         // FIXME handle entry block better also stack block
 
-        if ast_proc.basic_blocks.is_empty() {
+        if ast_proc.blocks.is_empty() {
             return Err(Error::new("procedure has no blocks", &ast_proc.name));
         }
 
         let maybe_ast_stack_block = ast_proc
-            .basic_blocks
+            .blocks
             .iter()
             .find(|block| block.name.text == "stack");
         let stack_slots = if let Some(ast_stack_block) = maybe_ast_stack_block {
@@ -61,12 +62,12 @@ impl ConverterAstToModule {
         };
 
         let ast_entry_block = ast_proc
-            .basic_blocks
+            .blocks
             .iter()
             .find(|block| block.name.text == "entry")
             .ok_or_else(|| Error::new("missing entry block", &ast_proc.name))?;
         let ast_other_blocks = ast_proc
-            .basic_blocks
+            .blocks
             .iter()
             .filter(|block| !(block.name.text == "stack" || block.name.text == "entry"));
 
@@ -77,17 +78,18 @@ impl ConverterAstToModule {
             ));
         }
 
-        let entry_block = self.ast_block_to_block(ast_entry_block, Some(&ast_proc.parameters))?;
+        let entry_block = self.ast_block_to_block(ast_entry_block)?;
 
         let mut other_blocks = Vec::new();
         for ast_block in ast_other_blocks {
-            other_blocks.push(self.ast_block_to_block(ast_block, None)?);
+            other_blocks.push(self.ast_block_to_block(ast_block)?);
         }
 
         let proc = Procedure {
             name: ast_proc.name.text.to_string(),
-            return_typ: Typ,
-            basic_blocks: BasicBlocks {
+            parameters: ast_map(&ast_proc.parameters, Self::ast_parameter_to_parameter)?,
+            returns: ast_map(&ast_proc.returns, Self::ast_parameter_to_parameter)?,
+            blocks: Blocks {
                 entry: entry_block,
                 others: other_blocks,
             },
@@ -95,20 +97,14 @@ impl ConverterAstToModule {
                 stack_slots,
                 highest_virtual_id: 1000, // FIXME actually get the highest id from the AST
             },
+            calling_convention: None,
         };
 
         Ok(proc)
     }
 
-    fn ast_block_to_block(
-        &mut self,
-        ast_block: &ast::BasicBlock,
-        ast_parameters_override: Option<&[ast::Parameter]>,
-    ) -> Result<BasicBlock, Error> {
-        let mut parameters = Vec::new();
-        for ast_parameter in ast_parameters_override.unwrap_or(&ast_block.parameters) {
-            parameters.push(Self::ast_parameter_to_parameter(ast_parameter)?);
-        }
+    fn ast_block_to_block(&mut self, ast_block: &ast::Block) -> Result<Block, Error> {
+        let parameters = ast_map(&ast_block.parameters, Self::ast_parameter_to_parameter)?;
 
         let mut instructions = Vec::new();
         for ast_instruction in &ast_block.instructions {
@@ -122,7 +118,7 @@ impl ConverterAstToModule {
             instructions.push(instr);
         }
 
-        Ok(BasicBlock {
+        Ok(Block {
             name: ast_block.name.text.to_string(),
             parameters,
             instructions,
@@ -131,7 +127,7 @@ impl ConverterAstToModule {
 
     fn ast_stack_block_to_stack_slots(
         &mut self,
-        ast_stack_block: &ast::BasicBlock,
+        ast_stack_block: &ast::Block,
     ) -> Result<Vec<StackSlot>, Error> {
         if !ast_stack_block.parameters.is_empty() {
             self.add_error(Error::new(
@@ -163,13 +159,33 @@ impl ConverterAstToModule {
                 .expect("stack slot must be named"),
         )?;
         assert_eq!(stack_slot_var.as_stack(), Some(expected_id));
-        let allocated_for_var = Self::ast_variable_to_variable(&ast_instruction.opcode)?;
-        Ok(StackSlot {
-            allocated_for: allocated_for_var
-                .to_non_stack()
-                .expect("must not be stack slot"),
-            typ: Typ,
-        })
+        let kind = match ast_instruction.opcode.text {
+            "local" => {
+                let ast_var = ast_instruction.operands.first().ok_or_else(|| {
+                    Error::new(
+                        "local stack slot missing allocated_for variable",
+                        &ast_instruction.opcode,
+                    )
+                })?;
+                let allocated_for = Self::ast_variable_to_variable(ast_var)?
+                    .to_non_stack()
+                    .ok_or_else(|| {
+                        Error::new(
+                            "local stack slot can only be allocated for a non stack variable",
+                            &ast_instruction.opcode,
+                        )
+                    })?;
+                StackSlotKind::Local { allocated_for }
+            }
+            "caller" => StackSlotKind::Caller,
+            kind_str => {
+                return Err(Error::new(
+                    format!("invalid stack slot kind `{}`", kind_str),
+                    &ast_instruction.opcode,
+                ));
+            }
+        };
+        Ok(StackSlot { typ: Typ, kind })
     }
 
     fn ast_parameter_to_parameter(ast_parameter: &ast::Parameter) -> Result<Parameter, Error> {

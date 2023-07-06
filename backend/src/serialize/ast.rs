@@ -7,8 +7,8 @@ pub struct Module<'a> {
 pub struct Procedure<'a> {
     pub name: Span<'a>,
     pub parameters: Vec<Parameter<'a>>,
-    pub return_typ: Option<Span<'a>>,
-    pub basic_blocks: Vec<BasicBlock<'a>>,
+    pub returns: Vec<Parameter<'a>>,
+    pub blocks: Vec<Block<'a>>,
 }
 
 #[derive(Debug)]
@@ -18,7 +18,7 @@ pub struct Parameter<'a> {
 }
 
 #[derive(Debug)]
-pub struct BasicBlock<'a> {
+pub struct Block<'a> {
     pub name: Span<'a>,
     pub parameters: Vec<Parameter<'a>>,
     pub instructions: Vec<Instruction<'a>>,

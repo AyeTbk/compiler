@@ -2,7 +2,7 @@ use std::fmt::{Arguments, Error as FmtError, Write};
 
 use crate::{
     instruction::{Condition, Instruction, Operand},
-    module::{BasicBlock, Module, Parameter, Procedure, StackSlot, Variable},
+    module::{Block, Module, Parameter, Procedure, StackSlot, StackSlotKind, Variable},
 };
 
 type Result = std::result::Result<(), FmtError>;
@@ -39,15 +39,18 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
 
     fn serialize_proc(&mut self, proc: &Procedure) -> Result {
         self.write_fmt(format_args!("proc {}", proc.name))?;
-        self.serialize_parameter_list(&proc.basic_blocks.entry.parameters)?;
-        self.serialize_type_annotation()?;
+        self.serialize_parameter_list(&proc.parameters)?;
+        if !proc.returns.is_empty() {
+            self.write_str(" -> ")?;
+            self.serialize_parameter_list(&proc.returns)?;
+        }
         self.write_str(" ")?;
 
         self.block(|this| {
             this.serialize_stack_block(&proc.data.stack_slots)?;
-            this.serialize_basic_block(&proc.basic_blocks.entry, true)?;
-            for basic_block in proc.basic_blocks.others.iter() {
-                this.serialize_basic_block(basic_block, false)?;
+            this.serialize_block(&proc.blocks.entry, true)?;
+            for block in proc.blocks.others.iter() {
+                this.serialize_block(block, false)?;
             }
             Ok(())
         })?;
@@ -64,21 +67,30 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         self.block(|this| {
             for (i, stack_slot) in stack_slots.iter().enumerate() {
                 this.write_fmt(format_args!("s{i} = "))?;
-                this.serialize_variable(&stack_slot.allocated_for.to_variable())?;
+                match &stack_slot.kind {
+                    StackSlotKind::Local { allocated_for } => {
+                        this.write_str("local ")?;
+                        this.serialize_variable(&allocated_for.to_variable())?;
+                    }
+                    StackSlotKind::Caller => {
+                        this.write_str("caller")?;
+                    }
+                }
+
                 this.writeln_str(";")?;
             }
             Ok(())
         })
     }
 
-    fn serialize_basic_block(&mut self, basic_block: &BasicBlock, is_entry: bool) -> Result {
-        self.write_fmt(format_args!("{}", basic_block.name))?;
+    fn serialize_block(&mut self, block: &Block, is_entry: bool) -> Result {
+        self.write_fmt(format_args!("{}", block.name))?;
         if !is_entry {
-            self.serialize_parameter_list(&basic_block.parameters)?;
+            self.serialize_parameter_list(&block.parameters)?;
         }
         self.write_str(" ")?;
         self.block(|this| {
-            for instruction in basic_block.instructions.iter() {
+            for instruction in block.instructions.iter() {
                 this.serialize_instruction(instruction)?;
                 this.writeln()?;
             }
@@ -170,7 +182,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     }
 
     fn serialize_type_annotation(&mut self) -> Result {
-        self.write_str(": u32")
+        self.write_str(": u64")
     }
 
     fn indent(&mut self) {
