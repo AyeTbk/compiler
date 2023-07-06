@@ -1,11 +1,13 @@
 use crate::{
     instruction::Instruction,
-    module::{Block, Procedure, ProcedureData},
+    module::{Block, Parameter, Procedure, ProcedureData},
 };
 
 pub struct Peephole<'a> {
     pub inserter: InstructionInserter,
-    pub data: &'a mut ProcedureData,
+    pub proc_parameters: &'a mut Vec<Parameter>,
+    pub proc_returns: &'a mut Vec<Parameter>,
+    pub proc_data: &'a mut ProcedureData,
 }
 
 impl<'a> Peephole<'a> {
@@ -16,7 +18,9 @@ impl<'a> Peephole<'a> {
         let blocks = &mut proc.blocks;
         let mut peephole = Self {
             inserter: Default::default(),
-            data: &mut proc.data,
+            proc_parameters: &mut proc.parameters,
+            proc_returns: &mut proc.returns,
+            proc_data: &mut proc.data,
         };
         for block in blocks.iter_mut() {
             for (i, instr) in block.instructions.iter_mut().enumerate() {
@@ -34,7 +38,9 @@ impl<'a> Peephole<'a> {
         let blocks = &mut proc.blocks;
         let mut peephole = Self {
             inserter: Default::default(),
-            data: &mut proc.data,
+            proc_parameters: &mut proc.parameters,
+            proc_returns: &mut proc.returns,
+            proc_data: &mut proc.data,
         };
         for (i, block) in blocks.iter_mut().enumerate() {
             peeper(&mut peephole, i, block);

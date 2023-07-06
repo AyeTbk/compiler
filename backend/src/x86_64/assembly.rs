@@ -13,6 +13,8 @@ pub fn generate_assembly(module: &Module) -> String {
 .global _start
 _start:
     call main
+    popq %rax
+    jmp _exit
 
 
 _exit:
@@ -164,7 +166,7 @@ fn generate_operand_assembly(proc: &Procedure, operand: Operand, buf: &mut Strin
         }
         Operand::Var(Variable::Stack(stack_slot_id)) => {
             let offset = proc.data.stack_slot_memory_offset(stack_slot_id);
-            buf.push_str(&format!("-{}(%rbp)", offset));
+            buf.push_str(&format!("{}(%rbp)", offset));
         }
         oprnd => unimplemented!("{:?}", oprnd),
     }

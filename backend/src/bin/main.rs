@@ -47,11 +47,11 @@ fn handle_module(mut module: Module) {
         allstack_allocate_parameters_and_return(proc);
         spill_all_virtual(proc);
         generate_loads_stores(proc);
-        // x86_64::regalloc::allocate_registers(proc);
+        x86_64::regalloc::allocate_registers(proc);
     }
 
-    let s = serialize::convert::convert_module_to_string(&module);
-    // let s = x86_64::assembly::generate_assembly(&module);
+    // let s = serialize::convert::convert_module_to_string(&module);
+    let s = x86_64::assembly::generate_assembly(&module);
 
     println!("{}", s);
 

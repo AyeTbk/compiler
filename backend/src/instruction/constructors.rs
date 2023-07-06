@@ -13,10 +13,10 @@ impl Instruction {
         }
     }
 
-    pub fn store(dest: StackSlotId, src: Variable) -> Instruction {
+    pub fn store(dest: StackSlotId, src: impl Into<Operand>) -> Instruction {
         Self {
             opcode: Opcode::Store,
-            src: SourceOperands::from_iter([Operand::Var(src)]),
+            src: SourceOperands::from_iter([src.into()]),
             dst: Some(Variable::Stack(dest)),
             target_block: None,
             cond: None,

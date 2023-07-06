@@ -48,13 +48,11 @@ impl ProcedureData {
         id.try_into().unwrap()
     }
 
-    pub fn get_stack_slot_for(&self, variable: VariableNonStack) -> Option<StackSlotId> {
-        self.stack_slots
-            .iter()
-            .enumerate()
+    pub fn get_local_stack_slot_for(&self, variable: VariableNonStack) -> Option<StackSlotId> {
+        self.local_stack_slots()
             .find(|(_, ss)| match ss.kind {
                 StackSlotKind::Local { allocated_for } => allocated_for == variable,
-                StackSlotKind::Caller => false,
+                _ => false,
             })
             .map(|(i, _)| i as StackSlotId)
     }
@@ -63,12 +61,29 @@ impl ProcedureData {
         (self.local_stack_slots().count() * std::mem::size_of::<u64>()) as u64
     }
 
-    pub fn stack_slot_memory_offset(&self, stack_slot: StackSlotId) -> u64 {
-        self.local_stack_slots()
-            .enumerate()
-            .take_while(|(i, _)| *i as u32 != stack_slot)
-            .map(|_| std::mem::size_of::<u64>() as u64)
-            .sum()
+    pub fn stack_slot_memory_offset(&self, stack_slot: StackSlotId) -> i64 {
+        // NOTE Currently works right-to-left
+        // NOTE Assumes offsets for caller need to jump past a saved %rbp and the address pushed by the 'call', that is +16
+
+        if self.is_local_stack_slot(stack_slot) {
+            let mut offset = 0;
+            for (i, _) in self.local_stack_slots().enumerate() {
+                offset -= std::mem::size_of::<u64>() as i64;
+                if i as u32 == stack_slot {
+                    break;
+                }
+            }
+            offset
+        } else {
+            let mut offset = 16;
+            for (i, _) in self.caller_stack_slots().enumerate() {
+                if i as u32 == stack_slot {
+                    break;
+                }
+                offset += std::mem::size_of::<u64>() as i64;
+            }
+            offset
+        }
     }
 
     pub fn acquire_new_virtual_variable(&mut self) -> Variable {
@@ -80,10 +95,24 @@ impl ProcedureData {
         self.highest_virtual_id
     }
 
-    fn local_stack_slots(&self) -> impl Iterator<Item = &StackSlot> {
+    pub fn is_local_stack_slot(&self, stack_slot: StackSlotId) -> bool {
+        self.local_stack_slots()
+            .find(|(i, _)| *i as StackSlotId == stack_slot)
+            .is_some()
+    }
+
+    pub fn local_stack_slots(&self) -> impl Iterator<Item = (usize, &StackSlot)> {
         self.stack_slots
             .iter()
-            .filter(|ss| matches!(ss.kind, StackSlotKind::Local { .. }))
+            .enumerate()
+            .filter(|(_, ss)| matches!(ss.kind, StackSlotKind::Local { .. }))
+    }
+
+    pub fn caller_stack_slots(&self) -> impl Iterator<Item = (usize, &StackSlot)> {
+        self.stack_slots
+            .iter()
+            .enumerate()
+            .filter(|(_, ss)| matches!(ss.kind, StackSlotKind::Caller))
     }
 }
 

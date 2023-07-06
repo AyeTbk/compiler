@@ -51,7 +51,7 @@ impl FromIterator<Operand> for SourceOperands {
 #[derive(Debug, Clone, Copy)]
 pub enum Operand {
     Var(Variable),
-    Imm(u32),
+    Imm(u64),
 }
 
 impl Operand {
