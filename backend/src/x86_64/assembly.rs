@@ -90,6 +90,7 @@ fn generate_instruction_assembly(
         Opcode::Load | Opcode::Store => generate_mov(proc, instr, buf),
         Opcode::Add | Opcode::Sub => generate_binary_instruction(proc, instr, buf),
         Opcode::Jump => generate_jump(proc, block, instr, buf),
+        Opcode::Call => generate_call(instr, buf),
         Opcode::Ret => generate_ret(buf),
         op => unimplemented!("{:?}", op),
     }
@@ -106,6 +107,13 @@ fn generate_mov(proc: &Procedure, instr: &Instruction, buf: &mut String) {
     generate_operand_assembly(proc, Operand::Var(dst), buf);
 
     buf.push_str("\n");
+}
+
+fn generate_call(instr: &Instruction, buf: &mut String) {
+    buf.push_str(&format!(
+        "    call {}\n",
+        instr.target.as_ref().unwrap().as_str()
+    ));
 }
 
 fn generate_ret(buf: &mut String) {

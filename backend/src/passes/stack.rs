@@ -50,7 +50,16 @@ pub fn allstack_setup_callees(declarations: &Declarations, proc: &mut Procedure)
                 ordinal += 1;
                 let new_stack_var = Variable::Stack(new_stack_id);
 
-                ph.insert_before(i, Instruction::store(new_stack_id, *arg_operand));
+                let actual_arg_operand = if let Some(arg_var) = arg_operand.to_variable() {
+                    new_stack_vars
+                        .get(&arg_var)
+                        .map(|&v| Operand::Var(v))
+                        .unwrap_or(*arg_operand)
+                } else {
+                    *arg_operand
+                };
+
+                ph.insert_before(i, Instruction::store(new_stack_id, actual_arg_operand));
                 *arg_operand = Operand::Var(new_stack_var);
             }
             for ret in &mut instr.dst {
@@ -126,6 +135,19 @@ pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
                 }
             }
         }
+
+        for operand in instr
+            .cond
+            .as_mut()
+            .iter_mut()
+            .flat_map(|c| c.operands_mut().into_iter())
+        {
+            if let Some(operand_var) = operand.to_variable() {
+                if let Some(stack_var) = new_stack_vars.get(&operand_var) {
+                    *operand = Operand::Var(*stack_var);
+                }
+            }
+        }
     });
 }
 
@@ -153,12 +175,6 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
 
     // 2. Handle instructions
     Peephole::peep_instructions(proc, |ph, _, instr| {
-        match instr.opcode {
-            Opcode::Load | Opcode::Store => return,
-            // Opcode::Call => return,
-            _ => (),
-        }
-
         // If dest is some and not stack:
         //  allocate a stack slot for it.
         //  replace it with the new stack variable.

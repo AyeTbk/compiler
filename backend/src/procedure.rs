@@ -116,27 +116,35 @@ impl StackData {
         //   arg positive,
         //   go up from stack frame pointer
 
-        todo!("rewrite this plz, so it works like the above comment says");
-
-        // if self.is_local_stack_slot(stack_slot) {
-        //     let mut offset = 0;
-        //     for (i, _) in self.local_stack_slots().enumerate() {
-        //         offset -= std::mem::size_of::<u64>() as i64;
-        //         if i as u32 == stack_slot {
-        //             break;
-        //         }
-        //     }
-        //     offset
-        // } else {
-        //     let mut offset = 16;
-        //     for (i, _) in self.caller_stack_slots().enumerate() {
-        //         if i as u32 == stack_slot {
-        //             break;
-        //         }
-        //         offset += std::mem::size_of::<u64>() as i64;
-        //     }
-        //     offset
-        // }
+        match &self.vars[stack_id as usize] {
+            StackVar::Call { ordinal, .. } => {
+                let mut offset = -(self.total_local_stack_size() as i64);
+                offset += *ordinal as i64 * std::mem::size_of::<u64>() as i64;
+                offset
+            }
+            StackVar::Slot(slot_idx) => match &self.slots[*slot_idx].kind {
+                StackSlotKind::Local => {
+                    let mut offset = 0;
+                    for (i, _) in self.local_stack_slots().enumerate() {
+                        offset -= std::mem::size_of::<u64>() as i64;
+                        if i == *slot_idx {
+                            break;
+                        }
+                    }
+                    offset
+                }
+                StackSlotKind::Caller => {
+                    let mut offset = 16;
+                    for (i, _) in self.caller_stack_slots().enumerate() {
+                        if i == *slot_idx {
+                            break;
+                        }
+                        offset += std::mem::size_of::<u64>() as i64;
+                    }
+                    offset
+                }
+            },
+        }
     }
 
     pub fn is_local_stack_slot(&self, stack_slot: StackId) -> bool {
