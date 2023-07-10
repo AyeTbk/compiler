@@ -29,12 +29,13 @@ pub struct Instruction<'a> {
     pub opcode: Span<'a>,
     pub operands: Vec<Span<'a>>,
     pub destination: Option<Span<'a>>,
-    pub target_block: Option<TargetBlock<'a>>,
+    pub target: Option<Target<'a>>,
     pub condition: Option<Condition<'a>>,
 }
 
 #[derive(Debug)]
-pub struct TargetBlock<'a> {
+pub struct Target<'a> {
+    pub sigil: Span<'a>,
     pub name: Span<'a>,
     pub arguments: Vec<Span<'a>>,
 }

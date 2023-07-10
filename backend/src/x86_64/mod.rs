@@ -1,4 +1,4 @@
-use crate::{instruction::Opcode, module::RegisterId, regalloc::InstructionConstraint};
+use crate::{instruction::Opcode, procedure::RegisterId, regalloc::InstructionConstraint};
 use macros::stringify_lowercase;
 
 pub mod assembly;

@@ -1,10 +1,97 @@
 use std::collections::HashMap;
 
 use crate::{
+    calling_convention::CallingConvention,
+    declarations::Declarations,
     instruction::{Instruction, Opcode, Operand},
-    module::{Procedure, Variable},
+    procedure::{Procedure, Variable},
     utils::Peephole,
 };
+
+pub fn allstack_setup_callees(declarations: &Declarations, proc: &mut Procedure) {
+    let mut new_stack_vars: HashMap<Variable, Variable> = HashMap::new();
+
+    Peephole::peep_instructions(proc, |ph, i, instr| {
+        if instr.opcode == Opcode::Call {
+            let name = instr
+                .target
+                .as_ref()
+                .expect("call instr should have a target")
+                .as_procedure()
+                .expect("call instr should have a procedure target");
+
+            let target_proc_decl = declarations
+                .get_procedure(name)
+                .expect("target proc should be declared");
+
+            assert_eq!(target_proc_decl.parameters.len(), instr.operands().count());
+            assert_eq!(target_proc_decl.returns.len(), instr.dst.iter().count());
+
+            assert!(
+                matches!(
+                    target_proc_decl.calling_convention,
+                    Some(CallingConvention::AllStack)
+                ),
+                "target proc call conv should be allstack"
+            );
+
+            // Allocate a StackCall and Call stack vars for the operands and returns.
+            // Insert stores for the args and update them to the new stack var.
+            // Update the returns to be their allocated ones and update later uses of the originals.
+            let call_stack_size =
+                ((instr.operands().count() + instr.dst.iter().count()) * 8) as u32; // FIXME this sucks
+            let call_idx = ph.proc_data.stack_data.allocate_call(call_stack_size);
+            let mut ordinal = 0;
+            for arg_operand in instr.operands_mut() {
+                let new_stack_id = ph
+                    .proc_data
+                    .stack_data
+                    .allocate_call_stack_var(call_idx, ordinal);
+                ordinal += 1;
+                let new_stack_var = Variable::Stack(new_stack_id);
+
+                ph.insert_before(i, Instruction::store(new_stack_id, *arg_operand));
+                *arg_operand = Operand::Var(new_stack_var);
+            }
+            for ret in &mut instr.dst {
+                let new_stack_slot = ph
+                    .proc_data
+                    .stack_data
+                    .allocate_call_stack_var(call_idx, ordinal);
+                ordinal += 1;
+                let new_stack_var = Variable::Stack(new_stack_slot);
+                new_stack_vars.insert(*ret, new_stack_var);
+                *ret = new_stack_var;
+            }
+        }
+
+        // Update operands
+        for operand in instr.operands_mut() {
+            match operand {
+                Operand::Var(operand_var) => {
+                    let Some(new_var) = new_stack_vars.get(operand_var) else { continue };
+                    *operand_var = *new_var;
+                }
+                _ => (),
+            }
+        }
+        // Update returns
+        for ret in &mut instr.dst {
+            let Some(new_var) = new_stack_vars.get(ret) else { continue };
+            *ret = *new_var;
+        }
+        // Update cond
+        for cond_operand in instr.cond.iter_mut().flat_map(|c| c.operands_mut()) {
+            match cond_operand {
+                Operand::Var(cond_var) => {
+                    let Some(new_var) = new_stack_vars.get(cond_var) else { continue };
+                    *cond_var = *new_var;
+                }
+                _ => (),
+            }
+        }
+    });
+}
 
 pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
     // NOTE: Loads and Stores will be handled by another pass.
@@ -13,19 +100,19 @@ pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
     // Only support virtual variables, panic on non virtual variables.
     // Replace every proc parameter with the allocated stack variable.
     let mut new_stack_vars = HashMap::new();
-    for param in &mut proc.parameters {
+    for param in &mut proc.signature.parameters {
         if !param.variable.is_virtual() {
             unimplemented!("non virtual variables not supported");
         }
 
-        let param_stack_slot = proc.data.allocate_caller_stack_slot();
+        let param_stack_slot = proc.data.stack_data.allocate_caller_stack_slot();
         let param_stack_var = Variable::Stack(param_stack_slot);
         new_stack_vars.insert(param.variable, param_stack_var);
         param.variable = param_stack_var;
     }
 
-    for ret in &mut proc.returns {
-        let ret_stack_slot = proc.data.allocate_caller_stack_slot();
+    for ret in &mut proc.signature.returns {
+        let ret_stack_slot = proc.data.stack_data.allocate_caller_stack_slot();
         let ret_stack_var = Variable::Stack(ret_stack_slot);
         ret.variable = ret_stack_var;
     }
@@ -45,30 +132,21 @@ pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
 pub fn spill_all_virtual(proc: &mut Procedure) {
     // NOTE: Loads and Stores will be handled by another pass.
 
-    // Entry block parameters are bound by their calling convention, so they will
-    // not be spilled; they'll be mapped to None instead of Some(new stack var).
-    let mut new_stack_vars: HashMap<Variable, Option<Variable>> = HashMap::new();
+    // FIXME entry no longer has parameters, update this
+    // FIXME dont touch call instr operands, they are determined by the callee call convention.
+
+    let mut new_stack_vars: HashMap<Variable, Variable> = HashMap::new();
 
     // 1. Handle block parameters
-    Peephole::peep_blocks(proc, |ph, i, block| {
-        if i == 0 {
-            for param in &mut block.parameters {
-                if param.variable.is_virtual() {
-                    new_stack_vars.insert(param.variable, None);
-                }
-            }
-        } else {
-            // allocate stack slot for all virtual parameters.
-            // replace parameter with new stack variable.
-            for param in &mut block.parameters {
-                if param.variable.is_virtual() {
-                    let stack_slot = ph
-                        .proc_data
-                        .allocate_local_stack_slot_for(param.variable.to_non_stack().unwrap());
-                    let stack_var = Variable::Stack(stack_slot);
-                    new_stack_vars.insert(param.variable, Some(stack_var));
-                    param.variable = stack_var;
-                }
+    Peephole::peep_blocks(proc, |ph, _, block| {
+        // allocate stack slot for all virtual parameters.
+        // replace parameter with new stack variable.
+        for param in &mut block.parameters {
+            if param.variable.is_virtual() {
+                let stack_slot = ph.proc_data.stack_data.allocate_local_stack_slot();
+                let stack_var = Variable::Stack(stack_slot);
+                new_stack_vars.insert(param.variable, stack_var);
+                param.variable = stack_var;
             }
         }
     });
@@ -77,6 +155,7 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
     Peephole::peep_instructions(proc, |ph, _, instr| {
         match instr.opcode {
             Opcode::Load | Opcode::Store => return,
+            // Opcode::Call => return,
             _ => (),
         }
 
@@ -85,11 +164,9 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
         //  replace it with the new stack variable.
         if let Some(dest_var) = instr.dst.as_mut() {
             if dest_var.is_virtual() {
-                let stack_slot = ph
-                    .proc_data
-                    .allocate_local_stack_slot_for(dest_var.to_non_stack().unwrap());
+                let stack_slot = ph.proc_data.stack_data.allocate_local_stack_slot();
                 let stack_var = Variable::Stack(stack_slot);
-                new_stack_vars.insert(*dest_var, Some(stack_var));
+                new_stack_vars.insert(*dest_var, stack_var);
                 *dest_var = stack_var;
             }
         }
@@ -101,7 +178,7 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
                 if !operand_var.is_virtual() {
                     continue;
                 }
-                if let Some(stack_var) = new_stack_vars.get(&operand_var).unwrap() {
+                if let Some(stack_var) = new_stack_vars.get(&operand_var) {
                     *operand = Operand::Var(*stack_var);
                 }
             }
@@ -112,7 +189,7 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
             for operand in cond.operands_mut() {
                 if let Some(operand_var) = operand.to_variable() {
                     if operand_var.is_virtual() {
-                        if let Some(stack_var) = new_stack_vars.get(&operand_var).unwrap() {
+                        if let Some(stack_var) = new_stack_vars.get(&operand_var) {
                             *operand = Operand::Var(*stack_var);
                         }
                     }
@@ -144,9 +221,9 @@ pub fn generate_loads_stores(proc: &mut Procedure) {
 
     Peephole::peep_instructions(proc, |ph, i, instr| {
         // Handle source operands
-        if matches!(instr.opcode, Opcode::Jump) {
-            let target_name = instr.target_block.as_ref().unwrap();
-            let target_paramters = block_parameters.get(target_name).unwrap();
+        if instr.opcode == Opcode::Jump {
+            let target_block_name = instr.target.as_ref().and_then(|t| t.as_block()).unwrap();
+            let target_paramters = block_parameters.get(target_block_name).unwrap();
             assert_eq!(instr.operands().count(), target_paramters.len());
             for (operand, param) in instr.operands_mut().zip(target_paramters) {
                 let operand_stack_slot = operand
@@ -162,7 +239,23 @@ pub fn generate_loads_stores(proc: &mut Procedure) {
                 ph.insert_before(i, Instruction::store(param_stack_slot, new_virtual_var));
                 *operand = Operand::Var(param.variable);
             }
-        } else {
+
+            // Handle condition operands
+            if let Some(cond) = &mut instr.cond {
+                for operand in cond.operands_mut() {
+                    if let Some(operand_var) = operand.to_variable() {
+                        if let Some(stack_slot) = operand_var.as_stack() {
+                            let new_virtual_var = ph.proc_data.acquire_new_virtual_variable();
+                            *operand = Operand::Var(new_virtual_var);
+                            ph.insert_before(i, Instruction::load(new_virtual_var, stack_slot));
+                        }
+                    }
+                }
+            }
+        } else if !matches!(
+            instr.opcode,
+            Opcode::Call | Opcode::Ret | Opcode::Load | Opcode::Store
+        ) {
             for operand in instr.operands_mut() {
                 if let Some(operand_var) = operand.to_variable() {
                     if let Some(stack_slot) = operand_var.as_stack() {
@@ -172,25 +265,17 @@ pub fn generate_loads_stores(proc: &mut Procedure) {
                     }
                 }
             }
-        }
 
-        // Handle destination
-        if let Some(dst_var) = &mut instr.dst {
-            if let Some(stack_slot) = dst_var.as_stack() {
-                let new_virtual_var = ph.proc_data.acquire_new_virtual_variable();
-                *dst_var = new_virtual_var;
-                ph.insert_after(i, Instruction::store(stack_slot, new_virtual_var));
-            }
-        }
-
-        // Handle condition operands
-        if let Some(cond) = &mut instr.cond {
-            for operand in cond.operands_mut() {
-                if let Some(operand_var) = operand.to_variable() {
-                    if let Some(stack_slot) = operand_var.as_stack() {
+            // Handle destination
+            if !matches!(
+                instr.opcode,
+                Opcode::Call | Opcode::Ret | Opcode::Load | Opcode::Store
+            ) {
+                if let Some(dst_var) = &mut instr.dst {
+                    if let Some(stack_var_id) = dst_var.as_stack() {
                         let new_virtual_var = ph.proc_data.acquire_new_virtual_variable();
-                        *operand = Operand::Var(new_virtual_var);
-                        ph.insert_before(i, Instruction::load(new_virtual_var, stack_slot));
+                        *dst_var = new_virtual_var;
+                        ph.insert_after(i, Instruction::store(stack_var_id, new_virtual_var));
                     }
                 }
             }
@@ -210,7 +295,12 @@ fn store_stack_rets(proc: &mut Procedure) {
             return;
         }
 
-        let returns = ph.proc_returns.iter().cloned().collect::<Vec<_>>();
+        let returns = ph
+            .proc_signature
+            .returns
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
         let operand_count = instr.operands().count();
 
         assert_eq!(operand_count, returns.len());
@@ -220,6 +310,41 @@ fn store_stack_rets(proc: &mut Procedure) {
                 ph.insert_before(i, Instruction::store(stack_slot_id, *operand));
                 *operand = Operand::Var(ret_param.variable);
             }
+        }
+    });
+}
+
+pub fn fix_memory_to_memory_loads_stores(proc: &mut Procedure) {
+    Peephole::peep_instructions(proc, |ph, i, instr| {
+        if !matches!(instr.opcode, Opcode::Load | Opcode::Store) {
+            return;
+        }
+        // Transforms
+        //     s1 = load s0;   or   s1 = store s0;
+        // into the form
+        //     v0 = load s0;
+        //     s1 = store v0;
+
+        let src = instr
+            .src
+            .iter_mut()
+            .next()
+            .expect("load/store instr should have a src operand");
+        let dst = instr
+            .dst
+            .as_mut()
+            .expect("load/store instr should have a src operand");
+
+        match (&src, &dst) {
+            (Operand::Var(Variable::Stack(src_id)), Variable::Stack(_)) => {
+                let new_virt_var = ph.proc_data.acquire_new_virtual_variable();
+
+                ph.insert_before(i, Instruction::load(new_virt_var, *src_id));
+
+                instr.opcode = Opcode::Store;
+                *src = Operand::Var(new_virt_var);
+            }
+            _ => (),
         }
     });
 }

@@ -159,16 +159,16 @@ impl<'a> Parser<'a> {
         }
 
         let mut operands = Vec::new();
-        let mut target_block = None;
+        let mut target = None;
         let mut condition = None;
 
         let mut token = self.predict_token()?;
-        if token.text == "#" {
-            target_block = Some(self.parse_instruction_target_block()?);
+        if ["#", "@"].contains(&token.text) {
+            target = Some(self.parse_instruction_target()?);
             token = self.predict_token()?;
         }
 
-        if target_block.is_none()
+        if target.is_none()
             && token.kind == TokenKind::Alphanumeric
             && !KEYWORDS.contains(&token.text)
         {
@@ -183,15 +183,16 @@ impl<'a> Parser<'a> {
             opcode,
             operands,
             destination,
-            target_block,
+            target,
             condition,
         })
     }
 
-    fn parse_instruction_target_block(&mut self) -> Result<TargetBlock<'a>, Error<'a>> {
-        self.expect_keyword("#")?;
+    fn parse_instruction_target(&mut self) -> Result<Target<'a>, Error<'a>> {
+        let sigil = self.expect_any_keyword_of(&["#", "@"])?.span();
+
         let name = self
-            .expect_any_alphanumeric(ExpectedKind::BlockName)?
+            .expect_any_alphanumeric(ExpectedKind::TargetName)?
             .span();
 
         let arguments = if self.predict_keyword("(")? {
@@ -208,7 +209,11 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
-        Ok(TargetBlock { name, arguments })
+        Ok(Target {
+            sigil,
+            name,
+            arguments,
+        })
     }
 
     fn parse_instruction_operands(&mut self) -> Result<Vec<Span<'a>>, Error<'a>> {
@@ -363,6 +368,19 @@ impl<'a> Parser<'a> {
             .predict_token()
             .map_eof_err_to(Error::unexpected_end_of_file(keyword))?;
         Ok(token.text == keyword)
+    }
+
+    fn _predict_any_keyword_of(&mut self, keywords: &[&'static str]) -> Result<bool, Error<'a>> {
+        let token = self
+            .predict_token()
+            .map_eof_err_to(Error::unexpected_end_of_file(keywords))?;
+        for keyword in keywords {
+            if token.text == *keyword {
+                self.read_token();
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn predict_token(&mut self) -> Result<Token<'a>, Error<'a>> {

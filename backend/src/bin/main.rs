@@ -1,10 +1,12 @@
 use std::process::ExitCode;
 
 use compiler_backend::{
+    calling_convention::CallingConvention,
     error_reporting::{make_error_report, report_error},
     module::Module,
     passes::stack::{
-        allstack_allocate_parameters_and_return, generate_loads_stores, spill_all_virtual,
+        allstack_allocate_parameters_and_return, allstack_setup_callees,
+        fix_memory_to_memory_loads_stores, generate_loads_stores, spill_all_virtual,
     },
     serialize, x86_64,
 };
@@ -27,10 +29,8 @@ fn main() -> ExitCode {
         errors.push(e);
     }
 
-    let module = convert_result.module;
-
     if errors.is_empty() {
-        handle_module(module);
+        handle_module(convert_result.module);
 
         ExitCode::SUCCESS
     } else {
@@ -43,10 +43,17 @@ fn main() -> ExitCode {
 }
 
 fn handle_module(mut module: Module) {
-    for proc in &mut module.procedures {
+    for proc in module.procedures.iter_mut() {
+        proc.signature.calling_convention = Some(CallingConvention::AllStack);
+        module.declarations.declare_procedure(&proc.signature);
+    }
+
+    for proc in module.procedures.iter_mut() {
         allstack_allocate_parameters_and_return(proc);
+        allstack_setup_callees(&module.declarations, proc);
         spill_all_virtual(proc);
         generate_loads_stores(proc);
+        fix_memory_to_memory_loads_stores(proc);
         x86_64::regalloc::allocate_registers(proc);
     }
 

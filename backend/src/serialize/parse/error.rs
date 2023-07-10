@@ -64,6 +64,7 @@ pub enum ExpectedKind {
     ProcedureName,
     Block,
     BlockName,
+    TargetName,
     RegisterName,
     TypeAnnotation,
     TypeName,

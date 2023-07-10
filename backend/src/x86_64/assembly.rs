@@ -1,6 +1,7 @@
 use crate::{
     instruction::{Condition, Instruction, Opcode, Operand},
-    module::{Block, Module, Procedure, Variable},
+    module::Module,
+    procedure::{Block, Procedure, Variable},
 };
 
 use super::Isa;
@@ -43,8 +44,8 @@ _handle_fallthrough:
 }
 
 fn generate_proc_assembly(proc: &Procedure, buf: &mut String) {
-    buf.push_str(&format!(".global {}\n", proc.name));
-    buf.push_str(&format!("{}:\n", proc.name));
+    buf.push_str(&format!(".global {}\n", proc.signature.name));
+    buf.push_str(&format!("{}:\n", proc.signature.name));
 
     generate_proc_prologue(proc, buf);
 
@@ -52,7 +53,7 @@ fn generate_proc_assembly(proc: &Procedure, buf: &mut String) {
         generate_block_assembly(proc, block, buf);
     }
 
-    generate_proc_epilogue(proc, buf);
+    generate_fallthrough_catch(proc, buf);
 }
 
 fn generate_proc_prologue(proc: &Procedure, buf: &mut String) {
@@ -60,13 +61,11 @@ fn generate_proc_prologue(proc: &Procedure, buf: &mut String) {
     buf.push_str("    movq %rsp, %rbp\n");
     buf.push_str(&format!(
         "    subq ${}, %rsp\n",
-        proc.data.combined_local_stack_slots_size()
+        proc.data.stack_data.total_local_stack_size()
     ));
 }
 
-fn generate_proc_epilogue(_proc: &Procedure, buf: &mut String) {
-    // buf.push_str("    leave\n");
-    // buf.push_str("    ret\n");
+fn generate_fallthrough_catch(_proc: &Procedure, buf: &mut String) {
     buf.push_str("    jmp _handle_fallthrough\n");
 }
 
@@ -153,7 +152,7 @@ fn generate_jump(proc: &Procedure, _block: &Block, instr: &Instruction, buf: &mu
         Some(Condition::Equals(_, _)) => "je",
         Some(Condition::NotEquals(_, _)) => "jne",
     };
-    let block_label = make_block_label(proc, &instr.target_block.as_ref().unwrap());
+    let block_label = make_block_label(proc, &instr.target.as_ref().unwrap().as_block().unwrap());
     buf.push_str(&format!("    {opcode} {block_label}\n"));
 }
 
@@ -165,7 +164,7 @@ fn generate_operand_assembly(proc: &Procedure, operand: Operand, buf: &mut Strin
             buf.push_str(Isa::register_name(register_id));
         }
         Operand::Var(Variable::Stack(stack_slot_id)) => {
-            let offset = proc.data.stack_slot_memory_offset(stack_slot_id);
+            let offset = proc.data.stack_data.stack_var_memory_offset(stack_slot_id);
             buf.push_str(&format!("{}(%rbp)", offset));
         }
         oprnd => unimplemented!("{:?}", oprnd),
@@ -173,5 +172,5 @@ fn generate_operand_assembly(proc: &Procedure, operand: Operand, buf: &mut Strin
 }
 
 fn make_block_label(proc: &Procedure, block_name: &str) -> String {
-    format!("{}_block_{}", proc.name, block_name)
+    format!("{}_block_{}", proc.signature.name, block_name)
 }

@@ -1,4 +1,4 @@
-pub const MULTICHAR_OPERATORS: &'static [&'static str] = &["==", "!=", "->"];
+pub const MULTICHAR_OPERATORS: &[&str] = &["==", "!=", "->"];
 
 #[derive(Debug, Clone, Copy)]
 pub struct Token<'a> {

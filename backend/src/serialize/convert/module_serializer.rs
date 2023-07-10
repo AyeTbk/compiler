@@ -1,8 +1,9 @@
 use std::fmt::{Arguments, Error as FmtError, Write};
 
 use crate::{
-    instruction::{Condition, Instruction, Operand},
-    module::{Block, Module, Parameter, Procedure, StackSlot, StackSlotKind, Variable},
+    instruction::{Condition, Instruction, Operand, Target},
+    module::Module,
+    procedure::{Block, Parameter, Procedure, StackData, StackSlotKind, StackVar, Variable},
 };
 
 type Result = std::result::Result<(), FmtError>;
@@ -38,16 +39,16 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     }
 
     fn serialize_proc(&mut self, proc: &Procedure) -> Result {
-        self.write_fmt(format_args!("proc {}", proc.name))?;
-        self.serialize_parameter_list(&proc.parameters)?;
-        if !proc.returns.is_empty() {
+        self.write_fmt(format_args!("proc {}", proc.signature.name))?;
+        self.serialize_parameter_list(&proc.signature.parameters)?;
+        if !proc.signature.returns.is_empty() {
             self.write_str(" -> ")?;
-            self.serialize_parameter_list(&proc.returns)?;
+            self.serialize_parameter_list(&proc.signature.returns)?;
         }
         self.write_str(" ")?;
 
         self.block(|this| {
-            this.serialize_stack_block(&proc.data.stack_slots)?;
+            this.serialize_stack_block(&proc.data.stack_data)?;
             this.serialize_block(&proc.blocks.entry, true)?;
             for block in proc.blocks.others.iter() {
                 this.serialize_block(block, false)?;
@@ -58,25 +59,34 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         Ok(())
     }
 
-    fn serialize_stack_block(&mut self, stack_slots: &[StackSlot]) -> Result {
-        if stack_slots.is_empty() {
+    fn serialize_stack_block(&mut self, stack_data: &StackData) -> Result {
+        if stack_data.slots.is_empty() {
             return Ok(());
         }
 
         self.write_str("stack ")?;
         self.block(|this| {
-            for (i, stack_slot) in stack_slots.iter().enumerate() {
+            for (i, stack_call) in stack_data.calls.iter().enumerate() {
+                this.writeln_str(&format!("call {}, {};", i, stack_call.size))?;
+            }
+            for (i, stack_var) in stack_data.vars.iter().enumerate() {
                 this.write_fmt(format_args!("s{i} = "))?;
-                match &stack_slot.kind {
-                    StackSlotKind::Local { allocated_for } => {
-                        this.write_str("local ")?;
-                        this.serialize_variable(&allocated_for.to_variable())?;
+                match &stack_var {
+                    StackVar::Call { call_idx, ordinal } => {
+                        this.write_fmt(format_args!("call {}, {}", call_idx, ordinal))?;
                     }
-                    StackSlotKind::Caller => {
-                        this.write_str("caller")?;
+                    StackVar::Slot(slot_idx) => {
+                        let slot = &stack_data.slots[*slot_idx];
+                        match &slot.kind {
+                            StackSlotKind::Local => {
+                                this.write_str("local")?;
+                            }
+                            StackSlotKind::Caller => {
+                                this.write_str("caller")?;
+                            }
+                        }
                     }
                 }
-
                 this.writeln_str(";")?;
             }
             Ok(())
@@ -117,15 +127,18 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         }
         self.write_str(instruction.opcode.to_str())?;
 
-        if let Some(target_block) = &instruction.target_block {
-            self.write_str(" #")?;
-            self.write_str(&target_block)?;
+        if let Some(target) = &instruction.target {
+            match target {
+                Target::Block(_) => self.write_str(" #")?,
+                Target::Procedure(_) => self.write_str(" @")?,
+            }
+            self.write_str(&target.as_str())?;
             if !instruction.src.operands.is_empty() {
                 self.write_str("(")?;
             }
         }
 
-        if instruction.operands().count() > 0 && instruction.target_block.is_none() {
+        if instruction.operands().count() > 0 && instruction.target.is_none() {
             self.write_str(" ")?;
         }
         for (i, operand) in instruction.operands().enumerate() {
@@ -135,10 +148,8 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
             self.serialize_operand(operand)?;
         }
 
-        if instruction.target_block.is_some() {
-            if !instruction.src.operands.is_empty() {
-                self.write_str(")")?;
-            }
+        if instruction.target.is_some() && !instruction.src.operands.is_empty() {
+            self.write_str(")")?;
         }
 
         if let Some(cond) = &instruction.cond {

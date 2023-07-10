@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     instruction::Operand,
-    module::{Procedure, Variable},
+    procedure::{Procedure, Variable},
     regalloc::InstructionConstraint,
 };
 

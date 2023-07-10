@@ -1,12 +1,16 @@
 use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
+use crate::declarations::Declarations;
 use crate::instruction::Condition;
-use crate::module::StackSlot;
-use crate::module::StackSlotKind;
+use crate::instruction::Target;
+use crate::procedure::StackData;
+use crate::procedure::StackId;
+use crate::procedure::{Signature, StackSlotKind};
 use crate::{
     instruction::{Instruction, Opcode, Operand, SourceOperands},
-    module::{Block, Blocks, Module, Parameter, Procedure, ProcedureData, Typ, Variable},
+    module::Module,
+    procedure::{Block, Blocks, Parameter, Procedure, ProcedureData, Typ, Variable},
 };
 
 pub struct ConverterAstToModule {
@@ -34,19 +38,22 @@ impl ConverterAstToModule {
     }
 
     fn ast_module_to_module(&mut self, ast_module: &ast::Module) -> Result<Module, Error> {
+        let mut declarations = Declarations::new();
         let mut procedures = Vec::new();
 
         for ast_proc in &ast_module.procedures {
             let proc = self.ast_proc_to_proc(ast_proc)?;
+            declarations.declare_procedure(&proc.signature);
             procedures.push(proc);
         }
 
-        Ok(Module { procedures })
+        Ok(Module {
+            declarations,
+            procedures,
+        })
     }
 
     fn ast_proc_to_proc(&mut self, ast_proc: &ast::Procedure) -> Result<Procedure, Error> {
-        // FIXME handle entry block better also stack block
-
         if ast_proc.blocks.is_empty() {
             return Err(Error::new("procedure has no blocks", &ast_proc.name));
         }
@@ -55,10 +62,10 @@ impl ConverterAstToModule {
             .blocks
             .iter()
             .find(|block| block.name.text == "stack");
-        let stack_slots = if let Some(ast_stack_block) = maybe_ast_stack_block {
-            self.ast_stack_block_to_stack_slots(ast_stack_block)?
+        let stack_data = if let Some(ast_stack_block) = maybe_ast_stack_block {
+            self.ast_stack_block_to_stack_data(ast_stack_block)?
         } else {
-            Vec::new()
+            Default::default()
         };
 
         let ast_entry_block = ast_proc
@@ -86,18 +93,20 @@ impl ConverterAstToModule {
         }
 
         let proc = Procedure {
-            name: ast_proc.name.text.to_string(),
-            parameters: ast_map(&ast_proc.parameters, Self::ast_parameter_to_parameter)?,
-            returns: ast_map(&ast_proc.returns, Self::ast_parameter_to_parameter)?,
+            signature: Signature {
+                name: ast_proc.name.text.to_string(),
+                parameters: ast_map(&ast_proc.parameters, Self::ast_parameter_to_parameter)?,
+                returns: ast_map(&ast_proc.returns, Self::ast_parameter_to_parameter)?,
+                calling_convention: None,
+            },
             blocks: Blocks {
                 entry: entry_block,
                 others: other_blocks,
             },
             data: ProcedureData {
-                stack_slots,
+                stack_data,
                 highest_virtual_id: 1000, // FIXME actually get the highest id from the AST
             },
-            calling_convention: None,
         };
 
         Ok(proc)
@@ -125,10 +134,10 @@ impl ConverterAstToModule {
         })
     }
 
-    fn ast_stack_block_to_stack_slots(
+    fn ast_stack_block_to_stack_data(
         &mut self,
         ast_stack_block: &ast::Block,
-    ) -> Result<Vec<StackSlot>, Error> {
+    ) -> Result<StackData, Error> {
         if !ast_stack_block.parameters.is_empty() {
             self.add_error(Error::new(
                 "stack block shouldn't have parameters",
@@ -136,56 +145,80 @@ impl ConverterAstToModule {
             ))
         }
 
-        let mut stack_slots = Vec::new();
-        for (i, ast_instruction) in ast_stack_block.instructions.iter().enumerate() {
-            let expected_id = i as u32;
-            stack_slots.push(Self::ast_instruction_to_stack_slot(
-                ast_instruction,
-                expected_id,
-            )?);
+        let mut stack_data = StackData::default();
+
+        for ast_instruction in ast_stack_block.instructions.iter() {
+            match Self::ast_instruction_to_stack_data_item(ast_instruction)? {
+                StackDataItem::Call { idx, size } => {
+                    let actual_idx = stack_data.allocate_call(size);
+                    assert_eq!(actual_idx, idx);
+                }
+                StackDataItem::CallVar {
+                    id,
+                    call_idx,
+                    ordinal,
+                } => {
+                    let actual_id = stack_data.allocate_call_stack_var(call_idx, ordinal);
+                    assert_eq!(actual_id, id);
+                }
+                StackDataItem::SlotVar { id, kind } => {
+                    let actual_id = match &kind {
+                        StackSlotKind::Local => stack_data.allocate_local_stack_slot(),
+                        StackSlotKind::Caller => stack_data.allocate_caller_stack_slot(),
+                    };
+                    assert_eq!(actual_id, id);
+                }
+            }
         }
 
-        Ok(stack_slots)
+        Ok(stack_data)
     }
 
-    fn ast_instruction_to_stack_slot(
-        ast_instruction: &ast::Instruction,
-        expected_id: u32,
-    ) -> Result<StackSlot, Error> {
-        let stack_slot_var = Self::ast_variable_to_variable(
-            ast_instruction
-                .destination
-                .as_ref()
-                .expect("stack slot must be named"),
-        )?;
-        assert_eq!(stack_slot_var.as_stack(), Some(expected_id));
-        let kind = match ast_instruction.opcode.text {
-            "local" => {
-                let ast_var = ast_instruction.operands.first().ok_or_else(|| {
-                    Error::new(
-                        "local stack slot missing allocated_for variable",
-                        &ast_instruction.opcode,
-                    )
-                })?;
-                let allocated_for = Self::ast_variable_to_variable(ast_var)?
-                    .to_non_stack()
-                    .ok_or_else(|| {
-                        Error::new(
-                            "local stack slot can only be allocated for a non stack variable",
-                            &ast_instruction.opcode,
-                        )
-                    })?;
-                StackSlotKind::Local { allocated_for }
+    fn ast_instruction_to_stack_data_item(
+        ast_instr: &ast::Instruction,
+    ) -> Result<StackDataItem, Error> {
+        let stack_var_id = if let Some(var_name) = &ast_instr.destination {
+            let stack_var = Self::ast_variable_to_variable(&var_name)?;
+            let id = stack_var.as_stack().unwrap();
+            Some(id)
+        } else {
+            None
+        };
+
+        match ast_instr.opcode.text {
+            kind_str @ ("local" | "caller") => {
+                let kind = match kind_str {
+                    "local" => StackSlotKind::Local,
+                    "caller" => StackSlotKind::Caller,
+                    _ => unreachable!(),
+                };
+                let id = stack_var_id.unwrap();
+                Ok(StackDataItem::SlotVar { id, kind })
             }
-            "caller" => StackSlotKind::Caller,
+            "call" => {
+                dbg!(&ast_instr.operands);
+                let call_idx = ast_instr.operands[0].text.parse::<u32>().unwrap();
+                let ordinal = ast_instr.operands[1].text.parse::<u32>().unwrap();
+                if let Some(id) = stack_var_id {
+                    Ok(StackDataItem::CallVar {
+                        id,
+                        call_idx,
+                        ordinal,
+                    })
+                } else {
+                    Ok(StackDataItem::Call {
+                        idx: call_idx,
+                        size: ordinal,
+                    })
+                }
+            }
             kind_str => {
                 return Err(Error::new(
-                    format!("invalid stack slot kind `{}`", kind_str),
-                    &ast_instruction.opcode,
+                    format!("invalid stack item kind `{}`", kind_str),
+                    &ast_instr.opcode,
                 ));
             }
-        };
-        Ok(StackSlot { typ: Typ, kind })
+        }
     }
 
     fn ast_parameter_to_parameter(ast_parameter: &ast::Parameter) -> Result<Parameter, Error> {
@@ -198,11 +231,18 @@ impl ConverterAstToModule {
     fn ast_instruction_to_instruction(
         ast_instruction: &ast::Instruction,
     ) -> Result<Instruction, Error> {
-        let (src, target_block) = if let Some(ast_target_block) = &ast_instruction.target_block {
+        let (src, target) = if let Some(ast_target) = &ast_instruction.target {
             let src = SourceOperands {
-                operands: ast_map(&ast_target_block.arguments, Self::ast_operand_to_operand)?,
+                operands: ast_map(&ast_target.arguments, Self::ast_operand_to_operand)?,
             };
-            (src, Some(ast_target_block.name.text.to_string()))
+            let target = if ast_target.sigil.text == "#" {
+                Target::Block(ast_target.name.text.to_string())
+            } else if ast_target.sigil.text == "@" {
+                Target::Procedure(ast_target.name.text.to_string())
+            } else {
+                return Err(Error::new("bad sigil", &ast_target.sigil));
+            };
+            (src, Some(target))
         } else {
             let src = SourceOperands {
                 operands: ast_map(&ast_instruction.operands, Self::ast_operand_to_operand)?,
@@ -214,7 +254,7 @@ impl ConverterAstToModule {
             opcode: Self::ast_opcode_to_opcode(&ast_instruction.opcode)?,
             src,
             dst: ast_map_option(&ast_instruction.destination, Self::ast_variable_to_variable)?,
-            target_block,
+            target,
             cond: ast_map_option(&ast_instruction.condition, Self::ast_condition_to_condition)?,
         })
     }
@@ -309,4 +349,20 @@ fn ast_map_option<T, U>(
     } else {
         Ok(None)
     }
+}
+
+enum StackDataItem {
+    Call {
+        idx: u32,
+        size: u32,
+    },
+    CallVar {
+        id: StackId,
+        call_idx: u32,
+        ordinal: u32,
+    },
+    SlotVar {
+        id: StackId,
+        kind: StackSlotKind,
+    },
 }

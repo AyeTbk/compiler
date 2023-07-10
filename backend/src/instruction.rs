@@ -1,4 +1,4 @@
-use crate::module::Variable;
+use crate::procedure::Variable;
 
 mod constructors;
 mod opcode;
@@ -8,8 +8,8 @@ pub use opcode::Opcode;
 pub struct Instruction {
     pub opcode: Opcode,
     pub src: SourceOperands,
-    pub dst: Option<Variable>,
-    pub target_block: Option<String>,
+    pub dst: Option<Variable>, // TODO Consider supporting multiple returns
+    pub target: Option<Target>,
     pub cond: Option<Condition>,
 }
 
@@ -73,6 +73,34 @@ impl Operand {
 impl From<Variable> for Operand {
     fn from(value: Variable) -> Self {
         Self::Var(value)
+    }
+}
+
+#[derive(Debug)]
+pub enum Target {
+    Block(String),
+    Procedure(String),
+}
+
+impl Target {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Block(s) | Self::Procedure(s) => s,
+        }
+    }
+
+    pub fn as_block(&self) -> Option<&str> {
+        match self {
+            Self::Block(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_procedure(&self) -> Option<&str> {
+        match self {
+            Self::Procedure(s) => Some(s),
+            _ => None,
+        }
     }
 }
 

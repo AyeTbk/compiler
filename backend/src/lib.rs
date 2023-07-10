@@ -1,7 +1,12 @@
+pub mod arena;
+pub mod calling_convention;
+pub mod declarations;
 pub mod error_reporting;
 pub mod instruction;
+pub mod interner;
 pub mod module;
 pub mod passes;
+pub mod procedure;
 pub mod regalloc;
 pub mod serialize;
 pub mod utils;
