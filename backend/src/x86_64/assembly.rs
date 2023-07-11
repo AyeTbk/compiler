@@ -144,8 +144,8 @@ fn generate_binary_instruction(proc: &Procedure, instr: &Instruction, buf: &mut 
 
 fn generate_jump(proc: &Procedure, _block: &Block, instr: &Instruction, buf: &mut String) {
     if let Some(cond) = instr.cond.as_ref() {
-        buf.push_str("    testq ");
-        let [a, b] = cond.operands();
+        buf.push_str("    cmpq ");
+        let [&a, &b] = cond.operands();
         // Imm values can only be in the first operand
 
         let (first, second) = if a.is_immediate() { (a, b) } else { (b, a) };

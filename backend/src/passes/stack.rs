@@ -50,7 +50,7 @@ pub fn allstack_setup_callees(declarations: &Declarations, proc: &mut Procedure)
                 ordinal += 1;
                 let new_stack_var = Variable::Stack(new_stack_id);
 
-                let actual_arg_operand = if let Some(arg_var) = arg_operand.to_variable() {
+                let actual_arg_operand = if let Some(arg_var) = arg_operand.as_variable() {
                     new_stack_vars
                         .get(&arg_var)
                         .map(|&v| Operand::Var(v))
@@ -63,14 +63,22 @@ pub fn allstack_setup_callees(declarations: &Declarations, proc: &mut Procedure)
                 *arg_operand = Operand::Var(new_stack_var);
             }
             for ret in &mut instr.dst {
-                let new_stack_slot = ph
+                let new_stack_var = ph
                     .proc_data
                     .stack_data
                     .allocate_call_stack_var(call_idx, ordinal);
                 ordinal += 1;
-                let new_stack_var = Variable::Stack(new_stack_slot);
-                new_stack_vars.insert(*ret, new_stack_var);
-                *ret = new_stack_var;
+                let new_stack_call_var = Variable::Stack(new_stack_var);
+
+                // Return values are moved to a dedicated local stack slot because otherwise,
+                // multiple calls could overwrite them.
+                let new_stack_slot = ph.proc_data.stack_data.allocate_local_stack_slot();
+                let new_stack_slot_var = Variable::Stack(new_stack_slot);
+
+                ph.insert_after(i, Instruction::store(new_stack_slot, new_stack_call_var));
+
+                new_stack_vars.insert(*ret, new_stack_slot_var);
+                *ret = new_stack_call_var;
             }
         }
 
@@ -129,7 +137,7 @@ pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
     // Modify every use of the proc parameters so they use the stack variable.
     Peephole::peep_instructions(proc, |_, _, instr| {
         for operand in instr.operands_mut() {
-            if let Some(operand_var) = operand.to_variable() {
+            if let Some(operand_var) = operand.as_variable() {
                 if let Some(stack_var) = new_stack_vars.get(&operand_var) {
                     *operand = Operand::Var(*stack_var);
                 }
@@ -142,7 +150,7 @@ pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
             .iter_mut()
             .flat_map(|c| c.operands_mut().into_iter())
         {
-            if let Some(operand_var) = operand.to_variable() {
+            if let Some(operand_var) = operand.as_variable() {
                 if let Some(stack_var) = new_stack_vars.get(&operand_var) {
                     *operand = Operand::Var(*stack_var);
                 }
@@ -190,7 +198,7 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
         // For every operand:
         //  replace with corresponding previously allocated stack variable.
         for operand in instr.operands_mut() {
-            if let Some(operand_var) = operand.to_variable() {
+            if let Some(operand_var) = operand.as_variable() {
                 if !operand_var.is_virtual() {
                     continue;
                 }
@@ -203,7 +211,7 @@ pub fn spill_all_virtual(proc: &mut Procedure) {
         // Handle condition operands
         if let Some(cond) = &mut instr.cond {
             for operand in cond.operands_mut() {
-                if let Some(operand_var) = operand.to_variable() {
+                if let Some(operand_var) = operand.as_variable() {
                     if operand_var.is_virtual() {
                         if let Some(stack_var) = new_stack_vars.get(&operand_var) {
                             *operand = Operand::Var(*stack_var);
@@ -243,7 +251,7 @@ pub fn generate_loads_stores(proc: &mut Procedure) {
             assert_eq!(instr.operands().count(), target_paramters.len());
             for (operand, param) in instr.operands_mut().zip(target_paramters) {
                 let operand_stack_slot = operand
-                    .to_variable()
+                    .as_variable()
                     .and_then(|v| v.as_stack())
                     .expect("non stack operand not currently supported");
                 let param_stack_slot = param
@@ -259,7 +267,7 @@ pub fn generate_loads_stores(proc: &mut Procedure) {
             // Handle condition operands
             if let Some(cond) = &mut instr.cond {
                 for operand in cond.operands_mut() {
-                    if let Some(operand_var) = operand.to_variable() {
+                    if let Some(operand_var) = operand.as_variable() {
                         if let Some(stack_slot) = operand_var.as_stack() {
                             let new_virtual_var = ph.proc_data.acquire_new_virtual_variable();
                             *operand = Operand::Var(new_virtual_var);
@@ -273,7 +281,7 @@ pub fn generate_loads_stores(proc: &mut Procedure) {
             Opcode::Call | Opcode::Ret | Opcode::Load | Opcode::Store
         ) {
             for operand in instr.operands_mut() {
-                if let Some(operand_var) = operand.to_variable() {
+                if let Some(operand_var) = operand.as_variable() {
                     if let Some(stack_slot) = operand_var.as_stack() {
                         let new_virtual_var = ph.proc_data.acquire_new_virtual_variable();
                         *operand = Operand::Var(new_virtual_var);

@@ -21,6 +21,16 @@ impl Instruction {
     pub fn operands_mut(&mut self) -> impl Iterator<Item = &mut Operand> {
         self.src.operands.iter_mut()
     }
+
+    pub fn condition_operands(&self) -> impl Iterator<Item = &Operand> {
+        self.cond.iter().flat_map(|c| c.operands().into_iter())
+    }
+
+    pub fn condition_operands_mut(&mut self) -> impl Iterator<Item = &mut Operand> {
+        self.cond
+            .iter_mut()
+            .flat_map(|c| c.operands_mut().into_iter())
+    }
 }
 
 #[derive(Debug)]
@@ -62,7 +72,7 @@ impl Operand {
         }
     }
 
-    pub fn to_variable(self) -> Option<Variable> {
+    pub fn as_variable(&self) -> Option<&Variable> {
         match self {
             Self::Var(var) => Some(var),
             _ => None,
@@ -111,10 +121,10 @@ pub enum Condition {
 }
 
 impl Condition {
-    pub fn operands(&self) -> [Operand; 2] {
+    pub fn operands(&self) -> [&Operand; 2] {
         match self {
-            Self::Equals(a, b) => [*a, *b],
-            Self::NotEquals(a, b) => [*a, *b],
+            Self::Equals(a, b) => [a, b],
+            Self::NotEquals(a, b) => [a, b],
         }
     }
 

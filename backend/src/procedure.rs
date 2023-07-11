@@ -231,9 +231,20 @@ pub enum Variable {
 
 impl Variable {
     pub fn is_virtual(&self) -> bool {
+        self.as_virtual().is_some()
+    }
+
+    pub fn as_virtual(&self) -> Option<VirtualId> {
         match self {
-            Variable::Virtual(_) => true,
-            _ => false,
+            Variable::Virtual(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub fn as_register(&self) -> Option<RegisterId> {
+        match self {
+            Variable::Register(id) => Some(*id),
+            _ => None,
         }
     }
 
