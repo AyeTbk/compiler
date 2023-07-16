@@ -1,4 +1,9 @@
-use crate::{instruction::Opcode, procedure::RegisterId, regalloc::InstructionConstraint};
+use crate::{
+    callconv::{CallingConvention, CallingConventionId},
+    instruction::Opcode,
+    procedure::RegisterId,
+    regalloc::InstructionConstraint,
+};
 use macros::stringify_lowercase;
 
 pub mod assembly;
@@ -27,19 +32,27 @@ impl Isa {
         }
     }
 
-    pub fn callee_saved_ids() -> &'static [u32] {
+    pub fn calling_convention(callconv_id: CallingConventionId) -> Option<CallingConvention> {
         use Register::*;
-        &[
-            Rbx as u32, Rbp as u32, Rsp as u32, R12 as u32, R13 as u32, R14 as u32, R15 as u32,
-        ]
-    }
-
-    pub fn caller_saved_ids() -> &'static [u32] {
-        use Register::*;
-        &[
-            Rax as u32, Rcx as u32, Rdx as u32, Rsi as u32, Rdi as u32, R8 as u32, R9 as u32,
-            R10 as u32, R11 as u32,
-        ]
+        match callconv_id {
+            CallingConventionId::SysV => Some(CallingConvention {
+                id: callconv_id,
+                integer_parameter_registers: [Rdi, Rsi, Rdx, Rcx, R8, R9]
+                    .into_iter()
+                    .map(|r| r as RegisterId)
+                    .collect(),
+                integer_return_register: Rax as RegisterId,
+                preserved_registers: [Rbx, Rbp, Rsp, R12, R13, R14, R15]
+                    .into_iter()
+                    .map(|r| r as RegisterId)
+                    .collect(),
+                scratch_registers: [Rax, Rcx, Rdx, Rdi, Rsi, R8, R9, R10, R11]
+                    .into_iter()
+                    .map(|r| r as RegisterId)
+                    .collect(),
+            }),
+            _ => None,
+        }
     }
 }
 

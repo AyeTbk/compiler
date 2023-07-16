@@ -34,12 +34,13 @@ macro_rules! define_opcodes {
 }
 
 define_opcodes! {
-    InvalidInstruction,
-    Store,
-    Load,
-    Call,
-    Ret,
-    Jump,
-    Add,
-    Sub,
+    InvalidInstruction, // Useless. Used for recoverable parsing.
+    Store, // Store to a memory location.
+    Load, // Load from a memory location.
+    Move, // Move an operand value to a variable. Used for register allocation.
+    Call, // Call a procedure.
+    Ret, // Return from a procedure.
+    Jump, // Jump to a block of the same procedure. Can have a condition.
+    Add, // Addition.
+    Sub, // Subtraction.
 }

@@ -32,4 +32,14 @@ impl Instruction {
             cond: None,
         }
     }
+
+    pub fn mov(dest: Variable, src: impl Into<Operand>) -> Instruction {
+        Self {
+            opcode: Opcode::Move,
+            src: SourceOperands::from_iter([src.into()]),
+            dst: Some(dest),
+            target: None,
+            cond: None,
+        }
+    }
 }

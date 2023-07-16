@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    calling_convention::CallingConvention,
+    callconv::CallingConventionId,
     declarations::Declarations,
     instruction::{Instruction, Opcode, Operand},
     procedure::{Procedure, Variable},
@@ -30,7 +30,7 @@ pub fn allstack_setup_callees(declarations: &Declarations, proc: &mut Procedure)
             assert!(
                 matches!(
                     target_proc_decl.calling_convention,
-                    Some(CallingConvention::AllStack)
+                    Some(CallingConventionId::AllStack)
                 ),
                 "target proc call conv should be allstack"
             );
@@ -117,7 +117,7 @@ pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
     // Only support virtual variables, panic on non virtual variables.
     // Replace every proc parameter with the allocated stack variable.
     let mut new_stack_vars = HashMap::new();
-    for param in &mut proc.signature.parameters {
+    for param in proc.blocks.entry_parameters_mut() {
         if !param.variable.is_virtual() {
             unimplemented!("non virtual variables not supported");
         }

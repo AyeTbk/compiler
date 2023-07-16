@@ -47,6 +47,22 @@ impl<'a> Peephole<'a> {
         }
     }
 
+    pub fn peep_entry_block(
+        proc: &'a mut Procedure,
+        mut peeper: impl FnMut(&mut Peephole, &mut Block),
+    ) {
+        let blocks = &mut proc.blocks;
+        let mut peephole = Self {
+            inserter: Default::default(),
+            proc_signature: &mut proc.signature,
+            proc_data: &mut proc.data,
+        };
+
+        peeper(&mut peephole, &mut blocks.entry);
+
+        peephole.inserter.apply(&mut blocks.entry);
+    }
+
     pub fn insert_before(&mut self, idx: usize, instr: Instruction) {
         self.inserter.insert_before(idx, instr);
     }

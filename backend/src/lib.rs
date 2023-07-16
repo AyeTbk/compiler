@@ -1,5 +1,5 @@
 pub mod arena;
-pub mod calling_convention;
+pub mod callconv;
 pub mod declarations;
 pub mod error_reporting;
 pub mod instruction;

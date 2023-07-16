@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    calling_convention::CallingConvention,
+    callconv::CallingConventionId,
     interner::{Interner, Symbol},
-    procedure::Signature,
+    procedure::Procedure,
 };
 
 #[derive(Debug, Default)]
@@ -24,14 +24,15 @@ impl Declarations {
         self.procedures.get(&symbol)
     }
 
-    pub fn declare_procedure(&mut self, signature: &Signature) {
-        let name = self.symbols.get_or_intern(&signature.name);
-        let parameters = signature
-            .parameters
-            .iter()
+    pub fn declare_procedure(&mut self, procedure: &Procedure) {
+        let name = self.symbols.get_or_intern(&procedure.signature.name);
+        let parameters = procedure
+            .blocks
+            .entry_parameters()
             .map(|_param| ProcedureParameter { typ: () })
             .collect();
-        let returns = signature
+        let returns = procedure
+            .signature
             .returns
             .iter()
             .map(|_ret| ProcedureReturn { typ: () })
@@ -42,7 +43,7 @@ impl Declarations {
             name,
             parameters,
             returns,
-            calling_convention: signature.calling_convention,
+            calling_convention: procedure.signature.calling_convention,
         };
 
         self.procedures.insert(name, procdecl);
@@ -55,7 +56,7 @@ pub struct ProcedureDeclaration {
     pub name: Symbol,
     pub parameters: Vec<ProcedureParameter>,
     pub returns: Vec<ProcedureReturn>,
-    pub calling_convention: Option<CallingConvention>,
+    pub calling_convention: Option<CallingConventionId>,
 }
 
 #[derive(Debug)]

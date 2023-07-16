@@ -40,7 +40,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
 
     fn serialize_proc(&mut self, proc: &Procedure) -> Result {
         self.write_fmt(format_args!("proc {}", proc.signature.name))?;
-        self.serialize_parameter_list(&proc.signature.parameters)?;
+        self.serialize_parameter_list(&proc.blocks.entry.parameters)?;
         if !proc.signature.returns.is_empty() {
             self.write_str(" -> ")?;
             self.serialize_parameter_list(&proc.signature.returns)?;

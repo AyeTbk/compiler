@@ -58,7 +58,7 @@ impl FromIterator<Operand> for SourceOperands {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Operand {
     Var(Variable),
     Imm(u64),

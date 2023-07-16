@@ -1,4 +1,4 @@
-use crate::{calling_convention::CallingConvention, instruction::Instruction};
+use crate::{callconv::CallingConventionId, instruction::Instruction};
 
 pub type VirtualId = u32;
 pub type RegisterId = u32;
@@ -7,9 +7,9 @@ pub type StackId = u32;
 #[derive(Debug, Clone)]
 pub struct Signature {
     pub name: String,
-    pub parameters: Vec<Parameter>,
+    // pub parameters: Vec<Parameter>, // Find it in proc.blocks
     pub returns: Vec<Parameter>,
-    pub calling_convention: Option<CallingConvention>,
+    pub calling_convention: Option<CallingConventionId>,
 }
 
 #[derive(Debug)]
@@ -206,6 +206,14 @@ impl Blocks {
         Some(&mut self.entry)
             .into_iter()
             .chain(self.others.iter_mut())
+    }
+
+    pub fn entry_parameters(&self) -> impl Iterator<Item = &Parameter> {
+        self.entry.parameters.iter()
+    }
+
+    pub fn entry_parameters_mut(&mut self) -> impl Iterator<Item = &mut Parameter> {
+        self.entry.parameters.iter_mut()
     }
 }
 

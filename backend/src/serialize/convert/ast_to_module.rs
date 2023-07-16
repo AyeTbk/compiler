@@ -43,7 +43,7 @@ impl ConverterAstToModule {
 
         for ast_proc in &ast_module.procedures {
             let proc = self.ast_proc_to_proc(ast_proc)?;
-            declarations.declare_procedure(&proc.signature);
+            declarations.declare_procedure(&proc);
             procedures.push(proc);
         }
 
@@ -85,7 +85,8 @@ impl ConverterAstToModule {
             ));
         }
 
-        let entry_block = self.ast_block_to_block(ast_entry_block)?;
+        let mut entry_block = self.ast_block_to_block(ast_entry_block)?;
+        entry_block.parameters = ast_map(&ast_proc.parameters, Self::ast_parameter_to_parameter)?;
 
         let mut other_blocks = Vec::new();
         for ast_block in ast_other_blocks {
@@ -95,7 +96,6 @@ impl ConverterAstToModule {
         let proc = Procedure {
             signature: Signature {
                 name: ast_proc.name.text.to_string(),
-                parameters: ast_map(&ast_proc.parameters, Self::ast_parameter_to_parameter)?,
                 returns: ast_map(&ast_proc.returns, Self::ast_parameter_to_parameter)?,
                 calling_convention: None,
             },

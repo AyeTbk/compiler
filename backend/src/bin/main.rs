@@ -1,13 +1,9 @@
 use std::process::ExitCode;
 
 use compiler_backend::{
-    calling_convention::CallingConvention,
+    callconv::CallingConventionId,
     error_reporting::{make_error_report, report_error},
     module::Module,
-    passes::stack::{
-        allstack_allocate_parameters_and_return, allstack_setup_callees,
-        fix_memory_to_memory_loads_stores, generate_loads_stores, spill_all_virtual,
-    },
     serialize, x86_64,
 };
 
@@ -44,21 +40,21 @@ fn main() -> ExitCode {
 
 fn handle_module(mut module: Module) {
     for proc in module.procedures.iter_mut() {
-        proc.signature.calling_convention = Some(CallingConvention::AllStack);
-        module.declarations.declare_procedure(&proc.signature);
+        proc.signature.calling_convention = Some(CallingConventionId::SysV);
+        module.declarations.declare_procedure(&proc);
     }
 
     for proc in module.procedures.iter_mut() {
-        allstack_allocate_parameters_and_return(proc);
-        allstack_setup_callees(&module.declarations, proc);
-        spill_all_virtual(proc);
-        generate_loads_stores(proc);
-        fix_memory_to_memory_loads_stores(proc);
-        x86_64::regalloc::allocate_registers(proc);
+        // allstack_allocate_parameters_and_return(proc);
+        // allstack_setup_callees(&module.declarations, proc);
+        // spill_all_virtual(proc);
+        // generate_loads_stores(proc);
+        // fix_memory_to_memory_loads_stores(proc);
+        x86_64::regalloc::allocate_registers(proc, &module.declarations);
     }
 
-    // let s = serialize::convert::convert_module_to_string(&module);
-    let s = x86_64::assembly::generate_assembly(&module);
+    let s = serialize::convert::convert_module_to_string(&module);
+    // let s = x86_64::assembly::generate_assembly(&module);
 
     println!("{}", s);
 
