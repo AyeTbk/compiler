@@ -78,6 +78,13 @@ impl Operand {
             _ => None,
         }
     }
+
+    pub fn as_variable_mut(&mut self) -> Option<&mut Variable> {
+        match self {
+            Self::Var(var) => Some(var),
+            _ => None,
+        }
+    }
 }
 
 impl From<Variable> for Operand {

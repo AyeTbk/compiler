@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
 };
 
 use crate::{
@@ -13,134 +13,182 @@ use crate::{
 
 use super::Isa;
 
-// TODO Change "live range" to "live interval"
-
 pub fn allocate_registers(proc: &mut Procedure, declarations: &Declarations) {
-    minimize_block_arguments_live_ranges(proc);
-    minimize_shared_src_dst_live_ranges(proc);
-    minimize_pinned_live_ranges(proc);
+    minimize_block_arguments_live_intervals(proc);
+    minimize_shared_src_dst_live_intervals(proc);
+    minimize_pinned_live_intervals(proc);
 
-    todo!("linear scan register allocation (that doesnt support pinned registers yet)");
+    let allocs = linear_scan_allocation(proc);
 
-    // OLD IMPLEMENTATION, DELETE WHEN BETTER IS MADE
-    // let mut ranges = compute_live_ranges(proc);
-
-    // let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
-    // let mut reg_distributor = callconv.register_distributor();
-
-    // // Pin correct registers to proc parameter live ranges (TODO and allocate stack space for excess, if needed)
-    // for (i, param) in proc.blocks.entry_parameters().enumerate() {
-    //     let var = param.variable.as_virtual().unwrap();
-    //     let reg = *callconv.integer_parameter_registers.get(i).unwrap();
-    //     ranges.assign_register_to_range_variable(reg, var);
-    // }
-
-    // // Pin correct registers to Call and Ret instrs
-    // Peephole::peep_instructions(proc, |_, _, instr| match instr.opcode {
-    //     Opcode::Call => {
-    //         let target = instr
-    //             .target
-    //             .as_ref()
-    //             .and_then(|t| t.as_procedure())
-    //             .unwrap();
-    //         let proc_decl = declarations.get_procedure(target).unwrap();
-    //         let callconv_id = proc_decl.calling_convention.unwrap();
-    //         let callee_callconv = Isa::calling_convention(callconv_id).unwrap();
-
-    //         for (i, operand) in instr.operands().enumerate() {
-    //             let var = operand.as_variable().unwrap().as_virtual().unwrap();
-    //             let reg = *callee_callconv.integer_parameter_registers.get(i).unwrap();
-    //             ranges.assign_register_to_range_variable(reg, var);
-    //         }
-    //         if let Some(dst) = &instr.dst {
-    //             let var = dst.as_virtual().unwrap();
-    //             let reg = callee_callconv.integer_return_register;
-    //             ranges.assign_register_to_range_variable(reg, var);
-    //         }
-    //     }
-    //     Opcode::Ret => {
-    //         let operand = instr.operands().next().unwrap();
-    //         let var = operand.as_variable().unwrap().as_virtual().unwrap();
-    //         let reg = callconv.integer_return_register;
-    //         ranges.assign_register_to_range_variable(reg, var);
-    //     }
-    //     _ => (),
-    // });
-
-    // // Allocate registers to all live ranges
-    // for edge in ranges.iter_range_edges() {
-    //     match edge {
-    //         LiveRangeEdge::Start { range_id } => {
-    //             let vars: Vec<String> = ranges
-    //                 .range_variables
-    //                 .get(&range_id)
-    //                 .unwrap()
-    //                 .iter()
-    //                 .map(|v| format!("v{}", v))
-    //                 .collect(); // DEBUG
-
-    //             if let Some(reg) = ranges.range_register(range_id) {
-    //                 eprintln!("DEBUG: Preassigned reg r{} to vars {:?}", reg, vars);
-    //                 reg_distributor.take_register(reg);
-    //             } else {
-    //                 let reg = reg_distributor.take_scratch_register().unwrap();
-    //                 eprintln!("DEBUG: Assigned reg r{} to vars {:?}", reg, vars);
-    //                 ranges.assign_register_to_range(reg, range_id);
-    //             }
-    //         }
-    //         LiveRangeEdge::End { range_id } => {
-    //             let vars: Vec<String> = ranges
-    //                 .range_variables
-    //                 .get(&range_id)
-    //                 .unwrap()
-    //                 .iter()
-    //                 .map(|v| format!("v{}", v))
-    //                 .collect(); // DEBUG
-
-    //             let salvaged_reg = ranges.range_register(range_id).unwrap();
-    //             reg_distributor.give_register(salvaged_reg);
-    //             eprintln!("DEBUG: Salvaged reg r{} from vars {:?}", salvaged_reg, vars);
-    //         }
-    //     }
-    // }
-
-    // // Change all virtual vars to their allocated registers.
-    // for block in proc.blocks.iter_mut() {
-    //     for param in &mut block.parameters {
-    //         if let Some(var) = param.variable.as_virtual() {
-    //             let reg = ranges.variable_register(var).unwrap();
-    //             param.variable = Variable::Register(reg);
-    //         }
-    //     }
-
-    //     for instr in &mut block.instructions {
-    //         for operand in instr.operands_mut() {
-    //             let Some(operand_var) = operand.as_variable() else { continue };
-    //             let Some(var) = operand_var.as_virtual() else { continue };
-
-    //             let reg = ranges.variable_register(var).unwrap();
-    //             *operand = Operand::Var(Variable::Register(reg));
-    //         }
-
-    //         for operand in instr.condition_operands_mut() {
-    //             let Some(operand_var) = operand.as_variable() else { continue };
-    //             let Some(var) = operand_var.as_virtual() else { continue };
-
-    //             let reg = ranges.variable_register(var).unwrap();
-    //             *operand = Operand::Var(Variable::Register(reg));
-    //         }
-
-    //         if let Some(dst) = &mut instr.dst {
-    //             if let Some(var) = dst.as_virtual() {
-    //                 let reg = ranges.variable_register(var).unwrap();
-    //                 *dst = Variable::Register(reg);
-    //             }
-    //         }
-    //     }
-    // }
+    apply_allocations(proc, &allocs);
 }
 
-fn minimize_block_arguments_live_ranges(proc: &mut Procedure) {
+fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
+    let do_alloc = |variable: &mut Variable| {
+        let var = variable.as_virtual().unwrap();
+        let alloc = allocs.allocations.get(&var).unwrap();
+        match alloc {
+            Allocation::Register(reg) => {
+                *variable = Variable::Register(*reg);
+            }
+            Allocation::Spilled => {
+                unimplemented!()
+            }
+        }
+    };
+
+    Peephole::peep_blocks(proc, |_, _, block| {
+        for param in &mut block.parameters {
+            do_alloc(&mut param.variable);
+        }
+
+        for instr in &mut block.instructions {
+            for operand in instr.operands_mut() {
+                if let Some(variable) = operand.as_variable_mut() {
+                    do_alloc(variable);
+                }
+            }
+            for cond_operand in instr.condition_operands_mut() {
+                if let Some(variable) = cond_operand.as_variable_mut() {
+                    do_alloc(variable);
+                }
+            }
+            if let Some(dst) = &mut instr.dst {
+                do_alloc(dst);
+            }
+        }
+    });
+}
+
+// Linear Scan Register Allocation, Poletto & Sarkar
+// https://web.cs.ucla.edu/~palsberg/course/cs132/linearscan.pdf
+fn linear_scan_allocation(proc: &Procedure) -> Allocations {
+    fn expire_old_intervals(
+        current_interval_id: IntervalId,
+        intervals: &LiveIntervals,
+        active_intervals: &mut Vec<IntervalId>,
+        free_registers: &mut Vec<RegisterId>,
+    ) {
+        let current_position = intervals.start_position(current_interval_id);
+        let mut new_active_intervals = Vec::new();
+        for &interval_id in active_intervals.iter() {
+            let interval_end = intervals.end_position(interval_id);
+            let interval_is_no_longer_active = interval_end < current_position;
+            if interval_is_no_longer_active {
+                let reg = intervals
+                    .interval_allocation(interval_id)
+                    .unwrap()
+                    .as_register()
+                    .unwrap();
+                free_registers.push(reg)
+            } else {
+                new_active_intervals.push(interval_id);
+            }
+        }
+        *active_intervals = new_active_intervals;
+    }
+
+    fn spill_at_interval(
+        current_interval_id: IntervalId,
+        intervals: &mut LiveIntervals,
+        active_intervals: &mut Vec<IntervalId>,
+    ) {
+        let spill_candidate_id = active_intervals
+            .last()
+            .copied()
+            .expect("spilling shouldn't be needed if there aren't any active live intervals");
+
+        // Heuristic: spill the interval that ends last (/ lasts longest from this point onward)
+        if intervals.end_position(spill_candidate_id) > intervals.end_position(current_interval_id)
+        {
+            // Reallocate the register spill_candidate had been assigned to the current_interval.
+            // Allocate spill_candidate as spilled.
+            let alloc = intervals.interval_allocation(spill_candidate_id).unwrap();
+            intervals.set_interval_allocation(spill_candidate_id, Allocation::Spilled);
+            intervals.set_interval_allocation(current_interval_id, alloc);
+
+            // Remove spill_candidate from active.
+            active_intervals.pop();
+
+            // Add current_interval to active, sorted by increasing end point.
+            add_interval_to_active_list(current_interval_id, intervals, active_intervals);
+        } else {
+            // Allocate current_interval as spilled.
+            intervals.set_interval_allocation(current_interval_id, Allocation::Spilled);
+        }
+    }
+
+    fn add_interval_to_active_list(
+        interval_id: IntervalId,
+        intervals: &LiveIntervals,
+        active_intervals: &mut Vec<IntervalId>,
+    ) {
+        // Add the live interval to the active list, sorted by increasing end point.
+        let interval_end = intervals.end_position(interval_id);
+        let insert_idx = active_intervals
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (i, intervals.end_position(id)))
+            .find(|(_, end)| *end > interval_end)
+            .map(|(i, _)| i)
+            .unwrap_or(active_intervals.len());
+        active_intervals.insert(insert_idx, interval_id);
+    }
+
+    let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
+    let mut free_registers = callconv.scratch_registers.clone();
+    free_registers.reverse();
+    let mut intervals = compute_live_intervals(proc);
+    let mut active_intervals: Vec<IntervalId> = Default::default();
+
+    for interval_id in 0..(intervals.intervals.len() as IntervalId) {
+        expire_old_intervals(
+            interval_id,
+            &intervals,
+            &mut active_intervals,
+            &mut free_registers,
+        );
+        if active_intervals.len() == free_registers.len() {
+            spill_at_interval(interval_id, &mut intervals, &mut active_intervals);
+        } else {
+            let reg = free_registers.pop().unwrap();
+            intervals.set_interval_allocation(interval_id, Allocation::Register(reg));
+            add_interval_to_active_list(interval_id, &intervals, &mut active_intervals);
+        }
+    }
+
+    let mut allocs = Allocations::default();
+    for interval_id in 0..(intervals.intervals.len() as IntervalId) {
+        let allocation = intervals.interval_allocation(interval_id).unwrap();
+        for var in intervals.interval_variables(interval_id) {
+            assert!(!allocs.allocations.contains_key(&var));
+            allocs.allocations.insert(var, allocation);
+        }
+    }
+    allocs
+}
+
+#[derive(Debug, Default)]
+struct Allocations {
+    allocations: HashMap<VirtualId, Allocation>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Allocation {
+    Register(RegisterId),
+    Spilled,
+}
+
+impl Allocation {
+    pub fn as_register(&self) -> Option<RegisterId> {
+        match self {
+            Allocation::Register(reg) => Some(*reg),
+            _ => None,
+        }
+    }
+}
+
+fn minimize_block_arguments_live_intervals(proc: &mut Procedure) {
     // All block arguments of all jumps to that block need to use the same registers.
     // To simplify register allocation, minimize the live range of block arguments.
 
@@ -157,7 +205,7 @@ fn minimize_block_arguments_live_ranges(proc: &mut Procedure) {
     });
 }
 
-fn minimize_shared_src_dst_live_ranges(proc: &mut Procedure) {
+fn minimize_shared_src_dst_live_intervals(proc: &mut Procedure) {
     // For some ISAs (primarily x86), some instructions tie one of the src operand
     // and the dst such that they are the same register. To simplify register
     // allocation, split the ranges of the variables of instrs with such a
@@ -177,7 +225,7 @@ fn minimize_shared_src_dst_live_ranges(proc: &mut Procedure) {
     });
 }
 
-fn minimize_pinned_live_ranges(proc: &mut Procedure) {
+fn minimize_pinned_live_intervals(proc: &mut Procedure) {
     // Live ranges might need to be pinned to certain registers, mostly because of
     // calling conventions (so, mainly proc parameters and Call and Ret instrs).
     // For every variable that needs to be pinned, introduce a Move to split up its
@@ -265,15 +313,18 @@ fn minimize_pinned_live_ranges(proc: &mut Procedure) {
     });
 }
 
-fn compute_live_ranges(proc: &Procedure) -> LiveRanges {
-    let mut ranges = LiveRanges::default();
+fn compute_live_intervals(proc: &Procedure) -> LiveIntervals {
+    // The resulting interval list is ordered by the intervals start position, which
+    // is required by the linear scan register allocator.
+
+    let mut intervals = LiveIntervals::default();
     let mut instr_idx = 0;
 
     for block in proc.blocks.iter() {
         // Track virtual block parameters
         for param in &block.parameters {
             let Some(virt_var_id) = param.variable.as_virtual() else { continue };
-            ranges.track_variable(virt_var_id, Position::Pre(instr_idx));
+            intervals.track_variable(virt_var_id, Position::Pre(instr_idx));
         }
 
         for instr in block.instructions.iter() {
@@ -287,14 +338,14 @@ fn compute_live_ranges(proc: &Procedure) -> LiveRanges {
             for operand in instr.operands() {
                 let Some(operand_var) = operand.as_variable() else { continue };
                 let Some(virt_var_id) = operand_var.as_virtual() else { continue };
-                ranges.track_variable(virt_var_id, Position::Pre(instr_idx));
+                intervals.track_variable(virt_var_id, Position::Pre(instr_idx));
             }
 
             // Track virtual cond operands
             for operand in instr.condition_operands() {
                 let Some(operand_var) = operand.as_variable() else { continue };
                 let Some(virt_var_id) = operand_var.as_virtual() else { continue };
-                ranges.track_variable(virt_var_id, Position::Pre(instr_idx));
+                intervals.track_variable(virt_var_id, Position::Pre(instr_idx));
             }
 
             // Track virtual dst
@@ -304,11 +355,12 @@ fn compute_live_ranges(proc: &Procedure) -> LiveRanges {
                     let first_operand_virt_var_id =
                         first_operand.as_variable().unwrap().as_virtual().unwrap();
                     let dst_virt_var_id = dst.as_virtual().unwrap();
-                    ranges.tie_tracked_var_with_other(first_operand_virt_var_id, dst_virt_var_id);
+                    intervals
+                        .tie_tracked_var_with_other(first_operand_virt_var_id, dst_virt_var_id);
                 }
 
                 if let Some(dst_virt_var_id) = dst.as_virtual() {
-                    ranges.track_variable(dst_virt_var_id, Position::Post(instr_idx));
+                    intervals.track_variable(dst_virt_var_id, Position::Post(instr_idx));
                 }
             }
 
@@ -316,100 +368,89 @@ fn compute_live_ranges(proc: &Procedure) -> LiveRanges {
         }
     }
 
-    ranges
+    intervals
 }
 
 #[derive(Debug, Default)]
-struct LiveRanges {
-    ranges: Vec<LiveRange>,
-    range_variables: HashMap<RangeId, HashSet<VirtualId>>,
-    range_register: HashMap<RangeId, RegisterId>,
-    variable_range: HashMap<VirtualId, RangeId>,
+struct LiveIntervals {
+    intervals: Vec<LiveInterval>,
+    interval_variables: HashMap<IntervalId, HashSet<VirtualId>>,
+    interval_allocation: HashMap<IntervalId, Allocation>,
+    variable_interval: HashMap<VirtualId, IntervalId>,
 }
 
-type RangeId = usize;
+type IntervalId = usize;
 
-impl LiveRanges {
+impl LiveIntervals {
     pub fn track_variable(&mut self, var: VirtualId, position: Position) {
-        if !self.variable_range.contains_key(&var) {
-            self.make_new_range_for_var(var, position);
+        if !self.variable_interval.contains_key(&var) {
+            self.make_new_interval_for_var(var, position);
         }
 
-        let range_id = *self.variable_range.get(&var).unwrap();
-        self.ranges[range_id].end_position = position;
+        let interval_id = *self.variable_interval.get(&var).unwrap();
+        self.intervals[interval_id].end_position = position;
     }
 
     pub fn tie_tracked_var_with_other(&mut self, var: VirtualId, other: VirtualId) {
-        let range_id = *self
-            .variable_range
+        let interval_id = *self
+            .variable_interval
             .get(&var)
             .expect("var should already be tracked");
-        self.variable_range
-            .insert(other, range_id)
+        self.variable_interval
+            .insert(other, interval_id)
             .ok_or(())
             .expect_err("other should not be already tracked");
-        self.range_variables
-            .get_mut(&range_id)
+        self.interval_variables
+            .get_mut(&interval_id)
             .unwrap()
             .insert(other);
     }
 
-    // pub fn range_variables(&self, range_id: usize) -> impl Iterator<Item = VirtualId> + '_ {
-    //     let vars = self.range_variables.get(&range_id).unwrap();
+    // pub fn range_variables(&self, interval_id: usize) -> impl Iterator<Item = VirtualId> + '_ {
+    //     let vars = self.range_variables.get(&interval_id).unwrap();
     //     vars.iter().copied()
     // }
 
-    pub fn assign_register_to_range(&mut self, reg: RegisterId, range_id: RangeId) {
-        self.range_register.insert(range_id, reg);
+    pub fn start_position(&self, interval_id: IntervalId) -> Position {
+        self.intervals[interval_id].start_position
     }
 
-    pub fn assign_register_to_range_variable(&mut self, reg: RegisterId, var: VirtualId) {
-        let range_id = *self.variable_range.get(&var).unwrap();
-        self.assign_register_to_range(reg, range_id);
+    pub fn end_position(&self, interval_id: IntervalId) -> Position {
+        self.intervals[interval_id].end_position
     }
 
-    pub fn range_register(&self, range_id: RangeId) -> Option<RegisterId> {
-        self.range_register.get(&range_id).copied()
+    pub fn interval_allocation(&self, interval_id: IntervalId) -> Option<Allocation> {
+        self.interval_allocation.get(&interval_id).copied()
     }
 
-    pub fn _variable_range(&self, var: VirtualId) -> Option<RangeId> {
-        self.variable_range.get(&var).copied()
+    pub fn set_interval_allocation(&mut self, interval_id: IntervalId, alloc: Allocation) {
+        self.interval_allocation.insert(interval_id, alloc);
     }
 
-    pub fn variable_register(&self, var: VirtualId) -> Option<RegisterId> {
-        let range_id = *self.variable_range.get(&var).unwrap();
-        self.range_register(range_id)
+    pub fn interval_variables(
+        &self,
+        interval_id: IntervalId,
+    ) -> impl Iterator<Item = VirtualId> + '_ {
+        self.interval_variables
+            .get(&interval_id)
+            .unwrap()
+            .iter()
+            .copied()
     }
 
-    pub fn iter_range_edges(&self) -> impl Iterator<Item = LiveRangeEdge> {
-        let mut edges = BTreeMap::<Position, Vec<LiveRangeEdge>>::new();
-        for (range_id, range) in self.ranges.iter().enumerate() {
-            edges
-                .entry(range.start_position)
-                .or_default()
-                .push(LiveRangeEdge::Start { range_id });
-            edges
-                .entry(range.end_position)
-                .or_default()
-                .push(LiveRangeEdge::End { range_id });
-        }
-
-        edges.into_iter().flat_map(|(_, v)| v.into_iter())
-    }
-
-    fn make_new_range_for_var(&mut self, var: VirtualId, start_position: Position) {
-        let idx = self.ranges.len();
-        self.ranges.push(LiveRange {
+    fn make_new_interval_for_var(&mut self, var: VirtualId, start_position: Position) {
+        let idx = self.intervals.len();
+        self.intervals.push(LiveInterval {
             start_position,
             end_position: start_position,
         });
-        self.range_variables.insert(idx, HashSet::from([var]));
-        self.variable_range.insert(var, idx);
+        self.interval_variables.insert(idx, HashSet::from([var]));
+        self.variable_interval.insert(var, idx);
     }
 }
 
 #[derive(Debug)]
-struct LiveRange {
+struct LiveInterval {
     start_position: Position,
     end_position: Position,
 }
@@ -437,10 +478,4 @@ impl Ord for Position {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum LiveRangeEdge {
-    Start { range_id: usize },
-    End { range_id: usize },
 }
