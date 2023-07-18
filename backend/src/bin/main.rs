@@ -53,8 +53,8 @@ fn handle_module(mut module: Module) {
         x86_64::regalloc::allocate_registers(proc, &module.declarations);
     }
 
-    let s = serialize::convert::convert_module_to_string(&module);
-    // let s = x86_64::assembly::generate_assembly(&module);
+    // let s = serialize::convert::convert_module_to_string(&module);
+    let s = x86_64::assembly::generate_assembly(&module);
 
     println!("{}", s);
 

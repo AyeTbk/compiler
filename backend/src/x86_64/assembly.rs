@@ -14,7 +14,6 @@ pub fn generate_assembly(module: &Module) -> String {
 .global _start
 _start:
     call main
-    popq %rax
     jmp _exit
 
 
@@ -87,7 +86,7 @@ fn generate_instruction_assembly(
     buf: &mut String,
 ) {
     match instr.opcode {
-        Opcode::Load | Opcode::Store => generate_mov(proc, instr, buf),
+        Opcode::Load | Opcode::Store | Opcode::Move => generate_mov(proc, instr, buf),
         Opcode::Add | Opcode::Sub => generate_binary_instruction(proc, instr, buf),
         Opcode::Jump => generate_jump(proc, block, instr, buf),
         Opcode::Call => generate_call(instr, buf),

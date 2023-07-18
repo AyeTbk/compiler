@@ -6,24 +6,122 @@ use std::{
 use crate::{
     declarations::Declarations,
     instruction::{Instruction, Opcode, Operand},
-    procedure::{Procedure, RegisterId, Variable, VirtualId},
+    procedure::{Procedure, RegisterId, StackId, Variable, VirtualId},
     regalloc::InstructionConstraint,
     utils::Peephole,
 };
 
 use super::Isa;
 
-pub fn allocate_registers(proc: &mut Procedure, declarations: &Declarations) {
+pub fn allocate_registers(proc: &mut Procedure, decls: &Declarations) {
     minimize_block_arguments_live_intervals(proc);
     minimize_shared_src_dst_live_intervals(proc);
     minimize_pinned_live_intervals(proc);
 
-    let allocs = linear_scan_allocation(proc);
+    let mut intervals = compute_live_intervals(proc);
+
+    pin_live_intervals_callconv(&mut intervals, proc, decls);
+    pin_live_intervals_block_parameters(&mut intervals, proc);
+
+    let allocs = linear_scan_allocation(proc, &mut intervals);
 
     apply_allocations(proc, &allocs);
 }
 
+fn pin_live_intervals_callconv(
+    intervals: &mut LiveIntervals,
+    proc: &mut Procedure,
+    decls: &Declarations,
+) {
+    // pin entry block parameters to proc callconv.
+    let proc_callconv =
+        Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
+    for (i, param) in proc.blocks.entry_parameters().enumerate() {
+        // FIXME handle need for spill.
+        let reg = proc_callconv.integer_parameter_registers[i];
+        let var = param.variable.as_virtual().unwrap();
+        intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
+    }
+
+    // for every instrs:
+    //   on Ret: pin operand to proc callconv.
+    //   on Call: pin operands and dst to target proc / callee callconv.
+    Peephole::peep_instructions(proc, |_, _, instr| {
+        if instr.opcode == Opcode::Ret {
+            // Multiple return values not supported right now.
+            assert!(instr.operands().count() <= 1);
+            for operand in instr.operands() {
+                let reg = proc_callconv.integer_return_register;
+                let var = operand.as_variable().unwrap().as_virtual().unwrap();
+                intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
+            }
+        } else if instr.opcode == Opcode::Call {
+            let callee_name = instr.target.as_ref().unwrap().as_procedure().unwrap();
+            let callee_decl = decls.get_procedure(callee_name).unwrap();
+            let calleeconv_id = callee_decl.calling_convention.unwrap();
+            let calleeconv = Isa::calling_convention(calleeconv_id).unwrap();
+
+            for (i, operand) in instr.operands().enumerate() {
+                // FIXME handle need for spill.
+                let reg = calleeconv.integer_parameter_registers[i];
+                let var = operand.as_variable().unwrap().as_virtual().unwrap();
+                intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
+            }
+            if let Some(dst) = &instr.dst {
+                let reg = calleeconv.integer_return_register;
+                let var = dst.as_virtual().unwrap();
+                intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
+            }
+        }
+    });
+}
+
+fn pin_live_intervals_block_parameters(intervals: &mut LiveIntervals, proc: &mut Procedure) {
+    let mut block_parameters_pins: HashMap<String, Vec<RegisterId>> = Default::default();
+
+    // Pin block parameters to registers.
+    {
+        let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
+        for block in &proc.blocks.others {
+            let mut regs = callconv.scratch_registers.clone();
+            let mut allocated_regs = Vec::new();
+            for param in &block.parameters {
+                let var = param.variable.as_virtual().unwrap();
+                let reg = regs
+                    .pop()
+                    .expect("if this panics, improve this allocation scheme, tyvm");
+                intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
+                allocated_regs.push(reg);
+            }
+            block_parameters_pins.insert(block.name.clone(), allocated_regs);
+        }
+    }
+
+    // Pin Jump operands accordingly.
+    Peephole::peep_instructions(proc, |_, _, instr| {
+        if instr.opcode != Opcode::Jump {
+            return;
+        }
+
+        let target_block = instr.target.as_ref().unwrap().as_block().unwrap();
+        let parameters_pins = block_parameters_pins.get(target_block).unwrap();
+        assert_eq!(parameters_pins.len(), instr.operands().count());
+        for (&operand, &pin) in instr.operands().zip(parameters_pins.iter()) {
+            let var = operand.as_variable().unwrap().as_virtual().unwrap();
+            intervals.set_variable_pinned_allocation(var, Allocation::Register(pin));
+        }
+    });
+}
+
 fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
+    let mut allocated_stack_vars: HashMap<VirtualId, StackId> = Default::default();
+    for (&virt_id, alloc) in &allocs.allocations {
+        if matches!(alloc, Allocation::Spilled) {
+            let stack_id = proc.data.stack_data.allocate_local_stack_slot();
+            allocated_stack_vars.insert(virt_id, stack_id);
+        }
+    }
+
     let do_alloc = |variable: &mut Variable| {
         let var = variable.as_virtual().unwrap();
         let alloc = allocs.allocations.get(&var).unwrap();
@@ -32,7 +130,8 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
                 *variable = Variable::Register(*reg);
             }
             Allocation::Spilled => {
-                unimplemented!()
+                let stack_id = allocated_stack_vars.get(&var).unwrap();
+                *variable = Variable::Stack(*stack_id)
             }
         }
     };
@@ -42,7 +141,7 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
             do_alloc(&mut param.variable);
         }
 
-        for instr in &mut block.instructions {
+        for instr in block.instructions.iter_mut() {
             for operand in instr.operands_mut() {
                 if let Some(variable) = operand.as_variable_mut() {
                     do_alloc(variable);
@@ -58,11 +157,38 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
             }
         }
     });
+
+    correct_move_load_stores(proc);
 }
 
-// Linear Scan Register Allocation, Poletto & Sarkar
+fn correct_move_load_stores(proc: &mut Procedure) {
+    // Corrections:
+    // sX = move rY   =>   change opcode to Store.
+    // rX = move sY   =>   change opcode to Load.
+
+    // TODO: add this too vvv
+    // X = move X   =>   remove instr.
+
+    Peephole::peep_instructions(proc, |_, _, instr| {
+        if instr.opcode != Opcode::Move {
+            return;
+        }
+
+        let src = instr.operands().next().unwrap();
+        let dst = instr.dst.unwrap();
+
+        use Variable::*;
+        match (dst, src.as_variable()) {
+            (Stack(_), Some(Register(_))) => instr.opcode = Opcode::Store,
+            (Register(_), Some(Stack(_))) => instr.opcode = Opcode::Load,
+            _ => (),
+        }
+    });
+}
+
+// Based on "Linear Scan Register Allocation" by Poletto & Sarkar
 // https://web.cs.ucla.edu/~palsberg/course/cs132/linearscan.pdf
-fn linear_scan_allocation(proc: &Procedure) -> Allocations {
+fn linear_scan_allocation(proc: &Procedure, intervals: &mut LiveIntervals) -> Allocations {
     fn expire_old_intervals(
         current_interval_id: IntervalId,
         intervals: &LiveIntervals,
@@ -93,10 +219,19 @@ fn linear_scan_allocation(proc: &Procedure) -> Allocations {
         intervals: &mut LiveIntervals,
         active_intervals: &mut Vec<IntervalId>,
     ) {
+        // Make sure to select a candidate that isnt pinned to a register!
         let spill_candidate_id = active_intervals
-            .last()
+            .iter()
             .copied()
-            .expect("spilling shouldn't be needed if there aren't any active live intervals");
+            .rfind(|&interval_id| intervals.interval_pinned_allocation(interval_id).is_none());
+        if spill_candidate_id.is_none() {
+            if active_intervals.len() == 0 {
+                panic!("spilling shouldn't be needed if there aren't any active live intervals");
+            } else {
+                panic!("impossible to spill, all active intervals are pinned");
+            }
+        }
+        let spill_candidate_id = spill_candidate_id.unwrap();
 
         // Heuristic: spill the interval that ends last (/ lasts longest from this point onward)
         if intervals.end_position(spill_candidate_id) > intervals.end_position(current_interval_id)
@@ -138,7 +273,6 @@ fn linear_scan_allocation(proc: &Procedure) -> Allocations {
     let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
     let mut free_registers = callconv.scratch_registers.clone();
     free_registers.reverse();
-    let mut intervals = compute_live_intervals(proc);
     let mut active_intervals: Vec<IntervalId> = Default::default();
 
     for interval_id in 0..(intervals.intervals.len() as IntervalId) {
@@ -148,8 +282,36 @@ fn linear_scan_allocation(proc: &Procedure) -> Allocations {
             &mut active_intervals,
             &mut free_registers,
         );
-        if active_intervals.len() == free_registers.len() {
-            spill_at_interval(interval_id, &mut intervals, &mut active_intervals);
+
+        let maybe_alloc = intervals.interval_pinned_allocation(interval_id);
+        if let Some(Allocation::Register(reg)) = maybe_alloc {
+            if !free_registers.contains(&reg) {
+                // find who has reg in active_intervals.
+                let (i, culprit) = active_intervals
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .find(|&(_, id)| {
+                        let Some(Allocation::Register(r)) = intervals.interval_allocation(id) else {
+                        return false
+                    };
+                        r == reg
+                    })
+                    .expect("a culprit should be found, otherwise pinned reg doesn't exist");
+                // spill them.
+                intervals.set_interval_allocation(culprit, Allocation::Spilled);
+                active_intervals.remove(i);
+            } else {
+                // Remove reg from available registers
+                free_registers = free_registers.into_iter().filter(|&r| r != reg).collect();
+            }
+            intervals.set_interval_allocation(interval_id, Allocation::Register(reg));
+            add_interval_to_active_list(interval_id, &intervals, &mut active_intervals);
+        } else if let Some(Allocation::Spilled) = maybe_alloc {
+            unimplemented!();
+            // spill curr_interval.
+        } else if active_intervals.len() == free_registers.len() {
+            spill_at_interval(interval_id, intervals, &mut active_intervals);
         } else {
             let reg = free_registers.pop().unwrap();
             intervals.set_interval_allocation(interval_id, Allocation::Register(reg));
@@ -201,6 +363,14 @@ fn minimize_block_arguments_live_intervals(proc: &mut Procedure) {
             let new_var = ph.proc_data.acquire_new_virtual_variable();
             ph.insert_before(i, Instruction::mov(new_var, *operand));
             *operand = Operand::Var(new_var);
+        }
+
+        for cond_operand in instr.condition_operands_mut() {
+            if cond_operand.as_variable().is_some() {
+                let new_var = ph.proc_data.acquire_new_virtual_variable();
+                ph.insert_before(i, Instruction::mov(new_var, *cond_operand));
+                *cond_operand = Operand::Var(new_var);
+            }
         }
     });
 }
@@ -254,6 +424,8 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure) {
                     ph.insert_before(0, Instruction::mov(new_var, param.variable));
                 } else {
                     unimplemented!("stack?");
+                    // answer: probably not, I think you should ignore callconv here, and
+                    //just add Moves to operands and dst.
                 }
             }
         }
@@ -280,7 +452,7 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure) {
                 // No such thing as conditional Call or Ret
                 assert_eq!(instr.condition_operands().count(), 0);
 
-                // Avoid emitting multiple moves for the save var if it's used multiple times.
+                // Avoid emitting multiple moves for the same var if it's used multiple times.
                 let unique_operands: HashSet<Operand> =
                     HashSet::from_iter(instr.operands().copied());
                 for operand in unique_operands {
@@ -375,7 +547,8 @@ fn compute_live_intervals(proc: &Procedure) -> LiveIntervals {
 struct LiveIntervals {
     intervals: Vec<LiveInterval>,
     interval_variables: HashMap<IntervalId, HashSet<VirtualId>>,
-    interval_allocation: HashMap<IntervalId, Allocation>,
+    interval_allocs: HashMap<IntervalId, Allocation>,
+    interval_pinned_allocs: HashMap<IntervalId, Allocation>,
     variable_interval: HashMap<VirtualId, IntervalId>,
 }
 
@@ -406,11 +579,6 @@ impl LiveIntervals {
             .insert(other);
     }
 
-    // pub fn range_variables(&self, interval_id: usize) -> impl Iterator<Item = VirtualId> + '_ {
-    //     let vars = self.range_variables.get(&interval_id).unwrap();
-    //     vars.iter().copied()
-    // }
-
     pub fn start_position(&self, interval_id: IntervalId) -> Position {
         self.intervals[interval_id].start_position
     }
@@ -420,11 +588,28 @@ impl LiveIntervals {
     }
 
     pub fn interval_allocation(&self, interval_id: IntervalId) -> Option<Allocation> {
-        self.interval_allocation.get(&interval_id).copied()
+        self.interval_allocs.get(&interval_id).copied()
     }
 
     pub fn set_interval_allocation(&mut self, interval_id: IntervalId, alloc: Allocation) {
-        self.interval_allocation.insert(interval_id, alloc);
+        self.interval_allocs.insert(interval_id, alloc);
+    }
+
+    pub fn interval_pinned_allocation(&self, interval_id: IntervalId) -> Option<Allocation> {
+        self.interval_pinned_allocs.get(&interval_id).copied()
+    }
+
+    pub fn set_interval_pinned_allocation(&mut self, interval_id: IntervalId, alloc: Allocation) {
+        self.interval_pinned_allocs.insert(interval_id, alloc);
+    }
+
+    pub fn set_variable_pinned_allocation(&mut self, var: VirtualId, alloc: Allocation) {
+        let interval_id = *self.variable_interval.get(&var).unwrap();
+        assert!(
+            self.interval_pinned_allocation(interval_id).is_none(),
+            "variable should not be pinned to more than one allocation"
+        );
+        self.set_interval_pinned_allocation(interval_id, alloc);
     }
 
     pub fn interval_variables(
@@ -474,6 +659,7 @@ impl PartialOrd for Position {
         }
     }
 }
+
 impl Ord for Position {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
