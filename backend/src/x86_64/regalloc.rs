@@ -23,7 +23,12 @@ pub fn allocate_registers(proc: &mut Procedure, decls: &Declarations) {
     pin_live_intervals_callconv(&mut intervals, proc, decls);
     pin_live_intervals_block_parameters(&mut intervals, proc);
 
-    let allocs = linear_scan_allocation(proc, &mut intervals);
+    // Gather usable registers
+    let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
+    let mut registers = callconv.scratch_registers.clone();
+    registers.reverse();
+
+    let allocs = linear_scan_allocation(&mut intervals, registers);
 
     apply_allocations(proc, &allocs);
 }
@@ -188,7 +193,13 @@ fn correct_move_load_stores(proc: &mut Procedure) {
 
 // Based on "Linear Scan Register Allocation" by Poletto & Sarkar
 // https://web.cs.ucla.edu/~palsberg/course/cs132/linearscan.pdf
-fn linear_scan_allocation(proc: &Procedure, intervals: &mut LiveIntervals) -> Allocations {
+fn linear_scan_allocation(
+    intervals: &mut LiveIntervals,
+    registers: Vec<RegisterId>,
+) -> Allocations {
+    // TODO move to its own module 'regalloc/linear_scan.rs'
+    // TODO also, regalloc as a whole could be moved out of x86_64, given how generic it is
+    // TODO but for that, it needs to be even more generic (eliminate direct uses of Isa struct).
     fn expire_old_intervals(
         current_interval_id: IntervalId,
         intervals: &LiveIntervals,
@@ -270,9 +281,8 @@ fn linear_scan_allocation(proc: &Procedure, intervals: &mut LiveIntervals) -> Al
         active_intervals.insert(insert_idx, interval_id);
     }
 
-    let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
-    let mut free_registers = callconv.scratch_registers.clone();
-    free_registers.reverse();
+    // TODO pass in a clobber points structure or something...
+    let mut free_registers = registers;
     let mut active_intervals: Vec<IntervalId> = Default::default();
 
     for interval_id in 0..(intervals.intervals.len() as IntervalId) {
@@ -283,8 +293,9 @@ fn linear_scan_allocation(proc: &Procedure, intervals: &mut LiveIntervals) -> Al
             &mut free_registers,
         );
 
-        let maybe_alloc = intervals.interval_pinned_allocation(interval_id);
-        if let Some(Allocation::Register(reg)) = maybe_alloc {
+        // TODO handle register clobbering (save scratch registers across calls) (just spill the interval if it contains a clobber point, for now)
+        let pinned_alloc = intervals.interval_pinned_allocation(interval_id);
+        if let Some(Allocation::Register(reg)) = pinned_alloc {
             if !free_registers.contains(&reg) {
                 // find who has reg in active_intervals.
                 let (i, culprit) = active_intervals
@@ -307,7 +318,7 @@ fn linear_scan_allocation(proc: &Procedure, intervals: &mut LiveIntervals) -> Al
             }
             intervals.set_interval_allocation(interval_id, Allocation::Register(reg));
             add_interval_to_active_list(interval_id, &intervals, &mut active_intervals);
-        } else if let Some(Allocation::Spilled) = maybe_alloc {
+        } else if let Some(Allocation::Spilled) = pinned_alloc {
             unimplemented!();
             // spill curr_interval.
         } else if active_intervals.len() == free_registers.len() {
