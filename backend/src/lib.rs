@@ -1,4 +1,3 @@
-pub mod arena;
 pub mod callconv;
 pub mod declarations;
 pub mod error_reporting;
