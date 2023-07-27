@@ -1,8 +1,10 @@
 pub mod callconv;
+pub mod context;
 pub mod declarations;
 pub mod error_reporting;
 pub mod instruction;
 pub mod interner;
+pub mod isa;
 pub mod module;
 pub mod passes;
 pub mod procedure;

@@ -31,6 +31,10 @@ impl Instruction {
             .iter_mut()
             .flat_map(|c| c.operands_mut().into_iter())
     }
+
+    pub fn target_procedure(&self) -> Option<&str> {
+        self.target.as_ref().and_then(|t| t.as_procedure())
+    }
 }
 
 #[derive(Debug)]

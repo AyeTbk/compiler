@@ -1,7 +1,6 @@
 use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
-use crate::declarations::Declarations;
 use crate::instruction::Condition;
 use crate::instruction::Target;
 use crate::procedure::StackData;
@@ -38,19 +37,14 @@ impl ConverterAstToModule {
     }
 
     fn ast_module_to_module(&mut self, ast_module: &ast::Module) -> Result<Module, Error> {
-        let mut declarations = Declarations::new();
         let mut procedures = Vec::new();
 
         for ast_proc in &ast_module.procedures {
             let proc = self.ast_proc_to_proc(ast_proc)?;
-            declarations.declare_procedure(&proc);
             procedures.push(proc);
         }
 
-        Ok(Module {
-            declarations,
-            procedures,
-        })
+        Ok(Module { procedures })
     }
 
     fn ast_proc_to_proc(&mut self, ast_proc: &ast::Procedure) -> Result<Procedure, Error> {

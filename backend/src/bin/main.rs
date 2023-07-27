@@ -1,7 +1,8 @@
 use std::process::ExitCode;
 
-use compiler_backend::{
+use compiler::{
     callconv::CallingConventionId,
+    context::Context,
     error_reporting::{make_error_report, report_error},
     module::Module,
     serialize, x86_64,
@@ -39,9 +40,10 @@ fn main() -> ExitCode {
 }
 
 fn handle_module(mut module: Module) {
+    let mut context = Context::new(x86_64::make_isa());
     for proc in module.procedures.iter_mut() {
         proc.signature.calling_convention = Some(CallingConventionId::SysV);
-        module.declarations.declare_procedure(&proc);
+        context.declarations.declare_procedure(&proc);
     }
 
     for proc in module.procedures.iter_mut() {
@@ -50,11 +52,11 @@ fn handle_module(mut module: Module) {
         // spill_all_virtual(proc);
         // generate_loads_stores(proc);
         // fix_memory_to_memory_loads_stores(proc);
-        x86_64::regalloc::allocate_registers(proc, &module.declarations);
+        x86_64::regalloc::allocate_registers(proc, &context);
     }
 
     // let s = serialize::convert::convert_module_to_string(&module);
-    let s = x86_64::assembly::generate_assembly(&module);
+    let s = x86_64::assembly::generate_assembly(&module, &context);
 
     println!("{}", s);
 

@@ -4,43 +4,71 @@ use std::{
 };
 
 use crate::{
-    declarations::Declarations,
+    context::Context,
     instruction::{Instruction, Opcode, Operand},
     procedure::{Procedure, RegisterId, StackId, Variable, VirtualId},
     regalloc::InstructionConstraint,
     utils::Peephole,
 };
 
-use super::Isa;
-
-pub fn allocate_registers(proc: &mut Procedure, decls: &Declarations) {
+pub fn allocate_registers(proc: &mut Procedure, context: &Context) {
     minimize_block_arguments_live_intervals(proc);
-    minimize_shared_src_dst_live_intervals(proc);
-    minimize_pinned_live_intervals(proc);
+    minimize_shared_src_dst_live_intervals(proc, context);
+    minimize_pinned_live_intervals(proc, context);
 
-    let mut intervals = compute_live_intervals(proc);
+    let mut intervals = compute_live_intervals(proc, context);
 
-    pin_live_intervals_callconv(&mut intervals, proc, decls);
-    pin_live_intervals_block_parameters(&mut intervals, proc);
+    pin_live_intervals_callconv(&mut intervals, proc, context);
+    pin_live_intervals_block_parameters(&mut intervals, proc, context);
 
     // Gather usable registers
-    let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
-    let mut registers = callconv.scratch_registers.clone();
+    let mut registers = context.isa.register_ids().to_vec();
     registers.reverse();
 
-    let allocs = linear_scan_allocation(&mut intervals, registers);
+    // Gather clobber points
+    let clobber_points = gather_clobber_points(proc, context);
+
+    let allocs = linear_scan_allocation(&mut intervals, registers, clobber_points);
 
     apply_allocations(proc, &allocs);
+}
+
+fn gather_clobber_points(proc: &Procedure, context: &Context) -> ClobberPoints {
+    // TODO make something like peephole but for immutable peeping / upgrade peephole to
+    // allow immutable peeping. And then replace this code with it.
+    let mut clobber_points = ClobberPoints::default();
+    let mut instr_i = 0;
+    for block in proc.blocks.iter() {
+        for instr in &block.instructions {
+            if instr.opcode != Opcode::Call {
+                continue;
+            }
+
+            // TODO make a compilation "Context" object passed as parameter, which contains
+            // target triple + declarations. Make it possible to ask it directly for a proc target's
+            // callconv.
+            context
+                .proc_callconv(
+                    instr
+                        .target_procedure()
+                        .expect("call instr should have a target proc"),
+                )
+                .expect("called proc should have a calling convention by now");
+
+            instr_i += 1;
+        }
+    }
+
+    clobber_points
 }
 
 fn pin_live_intervals_callconv(
     intervals: &mut LiveIntervals,
     proc: &mut Procedure,
-    decls: &Declarations,
+    context: &Context,
 ) {
     // pin entry block parameters to proc callconv.
-    let proc_callconv =
-        Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
+    let proc_callconv = context.proc_callconv(&proc.signature.name).unwrap();
     for (i, param) in proc.blocks.entry_parameters().enumerate() {
         // FIXME handle need for spill.
         let reg = proc_callconv.integer_parameter_registers[i];
@@ -61,10 +89,9 @@ fn pin_live_intervals_callconv(
                 intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
             }
         } else if instr.opcode == Opcode::Call {
-            let callee_name = instr.target.as_ref().unwrap().as_procedure().unwrap();
-            let callee_decl = decls.get_procedure(callee_name).unwrap();
-            let calleeconv_id = callee_decl.calling_convention.unwrap();
-            let calleeconv = Isa::calling_convention(calleeconv_id).unwrap();
+            let calleeconv = context
+                .proc_callconv(instr.target_procedure().unwrap())
+                .unwrap();
 
             for (i, operand) in instr.operands().enumerate() {
                 // FIXME handle need for spill.
@@ -81,12 +108,16 @@ fn pin_live_intervals_callconv(
     });
 }
 
-fn pin_live_intervals_block_parameters(intervals: &mut LiveIntervals, proc: &mut Procedure) {
+fn pin_live_intervals_block_parameters(
+    intervals: &mut LiveIntervals,
+    proc: &mut Procedure,
+    context: &Context,
+) {
     let mut block_parameters_pins: HashMap<String, Vec<RegisterId>> = Default::default();
 
     // Pin block parameters to registers.
     {
-        let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
+        let callconv = context.proc_callconv(&proc.signature.name).unwrap();
         for block in &proc.blocks.others {
             let mut regs = callconv.scratch_registers.clone();
             let mut allocated_regs = Vec::new();
@@ -196,6 +227,7 @@ fn correct_move_load_stores(proc: &mut Procedure) {
 fn linear_scan_allocation(
     intervals: &mut LiveIntervals,
     registers: Vec<RegisterId>,
+    clobber_points: ClobberPoints,
 ) -> Allocations {
     // TODO move to its own module 'regalloc/linear_scan.rs'
     // TODO also, regalloc as a whole could be moved out of x86_64, given how generic it is
@@ -386,14 +418,14 @@ fn minimize_block_arguments_live_intervals(proc: &mut Procedure) {
     });
 }
 
-fn minimize_shared_src_dst_live_intervals(proc: &mut Procedure) {
+fn minimize_shared_src_dst_live_intervals(proc: &mut Procedure, context: &Context) {
     // For some ISAs (primarily x86), some instructions tie one of the src operand
     // and the dst such that they are the same register. To simplify register
     // allocation, split the ranges of the variables of instrs with such a
     // constraint.
     Peephole::peep_instructions(proc, |ph, i, instr| {
         if !matches!(
-            Isa::instruction_constraint(instr.opcode),
+            context.isa.instruction_constraint(instr.opcode),
             Some(InstructionConstraint::FirstOperandIsAlsoDestination)
         ) {
             return;
@@ -406,7 +438,7 @@ fn minimize_shared_src_dst_live_intervals(proc: &mut Procedure) {
     });
 }
 
-fn minimize_pinned_live_intervals(proc: &mut Procedure) {
+fn minimize_pinned_live_intervals(proc: &mut Procedure, context: &Context) {
     // Live ranges might need to be pinned to certain registers, mostly because of
     // calling conventions (so, mainly proc parameters and Call and Ret instrs).
     // For every variable that needs to be pinned, introduce a Move to split up its
@@ -422,8 +454,7 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure) {
     // then detecting conflicts introduced by ranges being pinned to multiple
     // registers and/or ranges having to share the same register at the same time,
     // and then resolving these conflicts, which sounds more complicated to me.
-
-    let callconv = Isa::calling_convention(proc.signature.calling_convention.unwrap()).unwrap();
+    let callconv = context.proc_callconv(&proc.signature.name).unwrap();
 
     let mut new_var_map: HashMap<Variable, Variable> = Default::default();
     Peephole::peep_blocks(proc, |ph, block_i, block| {
@@ -496,7 +527,7 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure) {
     });
 }
 
-fn compute_live_intervals(proc: &Procedure) -> LiveIntervals {
+fn compute_live_intervals(proc: &Procedure, context: &Context) -> LiveIntervals {
     // The resulting interval list is ordered by the intervals start position, which
     // is required by the linear scan register allocator.
 
@@ -511,7 +542,7 @@ fn compute_live_intervals(proc: &Procedure) -> LiveIntervals {
         }
 
         for instr in block.instructions.iter() {
-            let constraint = Isa::instruction_constraint(instr.opcode);
+            let constraint = context.isa.instruction_constraint(instr.opcode);
             let first_operand_is_also_dst = matches!(
                 constraint,
                 Some(InstructionConstraint::FirstOperandIsAlsoDestination)
@@ -675,4 +706,15 @@ impl Ord for Position {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
+}
+
+#[derive(Debug, Default)]
+struct ClobberPoints {
+    points: Vec<ClobberPoint>,
+}
+
+#[derive(Debug)]
+struct ClobberPoint {
+    position: usize,
+    clobbered: Vec<RegisterId>,
 }
