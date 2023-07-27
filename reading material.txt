@@ -1,0 +1,6 @@
+C variadics in x86_64:
+  https://blog.nelhage.com/2010/10/amd64-and-va_arg/\
+
+
+
+

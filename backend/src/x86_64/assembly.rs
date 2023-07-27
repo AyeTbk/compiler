@@ -10,10 +10,10 @@ pub fn generate_assembly(module: &Module, context: &Context) -> String {
 
     buf.push_str(
         r#"
-.global _start
-_start:
-    call main
-    jmp _exit
+#.global _start
+#_start:
+#    call main
+#    jmp _exit
 
 
 _exit:

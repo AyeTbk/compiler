@@ -36,16 +36,15 @@ pub fn allocate_registers(proc: &mut Procedure, context: &Context) {
 fn gather_clobber_points(proc: &Procedure, context: &Context) -> ClobberPoints {
     // TODO make something like peephole but for immutable peeping / upgrade peephole to
     // allow immutable peeping. And then replace this code with it.
+    // FIXME see just above. This already caused a bug where instr_i wasnt getting incremented.
     let mut clobber_points = ClobberPoints::default();
     let mut instr_i = 0;
     for block in proc.blocks.iter() {
         for instr in &block.instructions {
-            if instr.opcode != Opcode::Call {
-                continue;
+            if instr.opcode == Opcode::Call {
+                let callconv = context.proc_callconv(instr.target_procedure());
+                clobber_points.insert(instr_i, callconv.scratch_registers.clone());
             }
-
-            let callconv = context.proc_callconv(instr.target_procedure());
-            clobber_points.insert(instr_i, callconv.scratch_registers.clone());
 
             instr_i += 1;
         }
@@ -318,11 +317,7 @@ fn linear_scan_allocation(
         let contains_clobber_point = !clobber_points.within(interval_id, &intervals).is_empty();
         let pinned_alloc = intervals.interval_pinned_allocation(interval_id);
 
-        if contains_clobber_point {
-            // spill for now, for simplicity.
-            intervals.set_interval_allocation(interval_id, Allocation::Spilled);
-            // TODO try to actually allocate a register and save it if necessary.
-        } else if let Some(Allocation::Register(reg)) = pinned_alloc {
+        if let Some(Allocation::Register(reg)) = pinned_alloc {
             if !free_registers.contains(&reg) {
                 // find who has reg in active_intervals.
                 let (i, culprit) = active_intervals
@@ -348,6 +343,10 @@ fn linear_scan_allocation(
         } else if let Some(Allocation::Spilled) = pinned_alloc {
             unimplemented!();
             // spill curr_interval.
+        } else if contains_clobber_point {
+            // spill for now, for simplicity.
+            intervals.set_interval_allocation(interval_id, Allocation::Spilled);
+            // TODO try to actually allocate a register and save it if necessary.
         } else if active_intervals.len() == free_registers.len() {
             spill_at_interval(interval_id, intervals, &mut active_intervals);
         } else {
@@ -732,7 +731,7 @@ impl ClobberPoints {
         let end = intervals.end_position(interval_id).round();
 
         let mut clobbered_within = HashSet::new();
-        for i in start..end {
+        for i in start..=end {
             if let Some(clobbered) = self.points.get(&i) {
                 clobbered_within.extend(clobbered);
             }
