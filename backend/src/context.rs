@@ -13,8 +13,9 @@ impl Context {
         }
     }
 
-    pub fn proc_callconv(&self, proc_name: &str) -> Option<&CallingConvention> {
-        let proc = self.declarations.get_procedure(proc_name)?;
-        self.isa.calling_convention(proc.calling_convention?)
+    pub fn proc_callconv(&self, proc_name: &str) -> &CallingConvention {
+        let proc = self.declarations.get_procedure(proc_name).unwrap();
+        let proc_callconv_id = proc.calling_convention.unwrap();
+        self.isa.calling_convention(proc_callconv_id).unwrap()
     }
 }

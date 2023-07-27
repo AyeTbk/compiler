@@ -44,16 +44,8 @@ fn gather_clobber_points(proc: &Procedure, context: &Context) -> ClobberPoints {
                 continue;
             }
 
-            // TODO make a compilation "Context" object passed as parameter, which contains
-            // target triple + declarations. Make it possible to ask it directly for a proc target's
-            // callconv.
-            context
-                .proc_callconv(
-                    instr
-                        .target_procedure()
-                        .expect("call instr should have a target proc"),
-                )
-                .expect("called proc should have a calling convention by now");
+            let callconv = context.proc_callconv(instr.target_procedure());
+            clobber_points.insert(instr_i, callconv.scratch_registers.clone());
 
             instr_i += 1;
         }
@@ -68,7 +60,7 @@ fn pin_live_intervals_callconv(
     context: &Context,
 ) {
     // pin entry block parameters to proc callconv.
-    let proc_callconv = context.proc_callconv(&proc.signature.name).unwrap();
+    let proc_callconv = context.proc_callconv(&proc.signature.name);
     for (i, param) in proc.blocks.entry_parameters().enumerate() {
         // FIXME handle need for spill.
         let reg = proc_callconv.integer_parameter_registers[i];
@@ -89,9 +81,7 @@ fn pin_live_intervals_callconv(
                 intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
             }
         } else if instr.opcode == Opcode::Call {
-            let calleeconv = context
-                .proc_callconv(instr.target_procedure().unwrap())
-                .unwrap();
+            let calleeconv = context.proc_callconv(instr.target_procedure());
 
             for (i, operand) in instr.operands().enumerate() {
                 // FIXME handle need for spill.
@@ -117,7 +107,7 @@ fn pin_live_intervals_block_parameters(
 
     // Pin block parameters to registers.
     {
-        let callconv = context.proc_callconv(&proc.signature.name).unwrap();
+        let callconv = context.proc_callconv(&proc.signature.name);
         for block in &proc.blocks.others {
             let mut regs = callconv.scratch_registers.clone();
             let mut allocated_regs = Vec::new();
@@ -313,7 +303,6 @@ fn linear_scan_allocation(
         active_intervals.insert(insert_idx, interval_id);
     }
 
-    // TODO pass in a clobber points structure or something...
     let mut free_registers = registers;
     let mut active_intervals: Vec<IntervalId> = Default::default();
 
@@ -325,9 +314,15 @@ fn linear_scan_allocation(
             &mut free_registers,
         );
 
-        // TODO handle register clobbering (save scratch registers across calls) (just spill the interval if it contains a clobber point, for now)
+        // TODO handle register clobbering (save used scratch registers across calls) (just spill the interval if it contains a clobber point, for now)
+        let contains_clobber_point = !clobber_points.within(interval_id, &intervals).is_empty();
         let pinned_alloc = intervals.interval_pinned_allocation(interval_id);
-        if let Some(Allocation::Register(reg)) = pinned_alloc {
+
+        if contains_clobber_point {
+            // spill for now, for simplicity.
+            intervals.set_interval_allocation(interval_id, Allocation::Spilled);
+            // TODO try to actually allocate a register and save it if necessary.
+        } else if let Some(Allocation::Register(reg)) = pinned_alloc {
             if !free_registers.contains(&reg) {
                 // find who has reg in active_intervals.
                 let (i, culprit) = active_intervals
@@ -454,7 +449,7 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure, context: &Context) {
     // then detecting conflicts introduced by ranges being pinned to multiple
     // registers and/or ranges having to share the same register at the same time,
     // and then resolving these conflicts, which sounds more complicated to me.
-    let callconv = context.proc_callconv(&proc.signature.name).unwrap();
+    let callconv = context.proc_callconv(&proc.signature.name);
 
     let mut new_var_map: HashMap<Variable, Variable> = Default::default();
     Peephole::peep_blocks(proc, |ph, block_i, block| {
@@ -688,6 +683,16 @@ enum Position {
     Post(usize), // Right after instr
 }
 
+impl Position {
+    pub fn round(self) -> usize {
+        match self {
+            Self::Pre(0) => 0,
+            Self::Pre(i) => i - 1,
+            Self::Post(i) => i + 1,
+        }
+    }
+}
+
 impl PartialOrd for Position {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         use Position::*;
@@ -710,11 +715,29 @@ impl Ord for Position {
 
 #[derive(Debug, Default)]
 struct ClobberPoints {
-    points: Vec<ClobberPoint>,
+    points: HashMap<usize, Vec<RegisterId>>,
 }
 
-#[derive(Debug)]
-struct ClobberPoint {
-    position: usize,
-    clobbered: Vec<RegisterId>,
+impl ClobberPoints {
+    pub fn insert(&mut self, position: usize, clobbered: Vec<RegisterId>) {
+        self.points.insert(position, clobbered);
+    }
+
+    pub fn within(
+        &self,
+        interval_id: IntervalId,
+        intervals: &LiveIntervals,
+    ) -> HashSet<RegisterId> {
+        let start = intervals.start_position(interval_id).round();
+        let end = intervals.end_position(interval_id).round();
+
+        let mut clobbered_within = HashSet::new();
+        for i in start..end {
+            if let Some(clobbered) = self.points.get(&i) {
+                clobbered_within.extend(clobbered);
+            }
+        }
+
+        clobbered_within
+    }
 }
