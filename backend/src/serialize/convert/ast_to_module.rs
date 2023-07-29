@@ -1,8 +1,10 @@
 use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
+use crate::callconv::CallingConventionId;
 use crate::instruction::Condition;
 use crate::instruction::Target;
+use crate::procedure::ExternalProcedure;
 use crate::procedure::StackData;
 use crate::procedure::StackId;
 use crate::procedure::{Signature, StackSlotKind};
@@ -38,18 +40,35 @@ impl ConverterAstToModule {
 
     fn ast_module_to_module(&mut self, ast_module: &ast::Module) -> Result<Module, Error> {
         let mut procedures = Vec::new();
-
         for ast_proc in &ast_module.procedures {
             let proc = self.ast_proc_to_proc(ast_proc)?;
             procedures.push(proc);
         }
 
-        Ok(Module { procedures })
+        let mut external_procedures = Vec::new();
+        for ast_exproc in &ast_module.external_procedures {
+            // let exproc = self.ast_exproc_to_exproc(ast_proc)?;
+            let exproc = ExternalProcedure {
+                name: ast_exproc.name.text.to_string(),
+                parameters: ast_exproc.parameters.iter().map(|_| Typ).collect(),
+                returns: ast_exproc.returns.iter().map(|_| Typ).collect(),
+                calling_convention: CallingConventionId::PlatformDefault,
+            };
+            external_procedures.push(exproc);
+        }
+
+        Ok(Module {
+            external_procedures,
+            procedures,
+        })
     }
 
     fn ast_proc_to_proc(&mut self, ast_proc: &ast::Procedure) -> Result<Procedure, Error> {
         if ast_proc.blocks.is_empty() {
-            return Err(Error::new("procedure has no blocks", &ast_proc.name));
+            return Err(Error::new(
+                "procedure has no blocks",
+                &ast_proc.signature.name,
+            ));
         }
 
         let maybe_ast_stack_block = ast_proc
@@ -66,7 +85,7 @@ impl ConverterAstToModule {
             .blocks
             .iter()
             .find(|block| block.name.text == "entry")
-            .ok_or_else(|| Error::new("missing entry block", &ast_proc.name))?;
+            .ok_or_else(|| Error::new("missing entry block", &ast_proc.signature.name))?;
         let ast_other_blocks = ast_proc
             .blocks
             .iter()
@@ -80,7 +99,10 @@ impl ConverterAstToModule {
         }
 
         let mut entry_block = self.ast_block_to_block(ast_entry_block)?;
-        entry_block.parameters = ast_map(&ast_proc.parameters, Self::ast_parameter_to_parameter)?;
+        entry_block.parameters = ast_map(
+            &ast_proc.signature.parameters,
+            Self::ast_parameter_to_parameter,
+        )?;
 
         let mut other_blocks = Vec::new();
         for ast_block in ast_other_blocks {
@@ -89,8 +111,8 @@ impl ConverterAstToModule {
 
         let proc = Procedure {
             signature: Signature {
-                name: ast_proc.name.text.to_string(),
-                returns: ast_map(&ast_proc.returns, Self::ast_parameter_to_parameter)?,
+                name: ast_proc.signature.name.text.to_string(),
+                returns: ast_proc.signature.returns.iter().map(|_| Typ).collect(),
                 calling_convention: None,
             },
             blocks: Blocks {
@@ -216,8 +238,12 @@ impl ConverterAstToModule {
     }
 
     fn ast_parameter_to_parameter(ast_parameter: &ast::Parameter) -> Result<Parameter, Error> {
+        let parameter_name = ast_parameter
+            .name
+            .as_ref()
+            .ok_or_else(|| Error::new("missing parameter name".to_string(), &ast_parameter.typ))?;
         Ok(Parameter {
-            variable: Self::ast_variable_to_variable(&ast_parameter.name)?,
+            variable: Self::ast_variable_to_variable(parameter_name)?,
             typ: Typ,
         })
     }

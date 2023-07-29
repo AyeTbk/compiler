@@ -2,6 +2,7 @@ use crate::procedure::RegisterId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CallingConventionId {
+    PlatformDefault,
     AllStack,
     SysV,
 }

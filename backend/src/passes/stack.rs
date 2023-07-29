@@ -128,10 +128,11 @@ pub fn allstack_allocate_parameters_and_return(proc: &mut Procedure) {
         param.variable = param_stack_var;
     }
 
-    for ret in &mut proc.signature.returns {
-        let ret_stack_slot = proc.data.stack_data.allocate_caller_stack_slot();
-        let ret_stack_var = Variable::Stack(ret_stack_slot);
-        ret.variable = ret_stack_var;
+    for _ret in &mut proc.signature.returns {
+        // let ret_stack_slot = proc.data.stack_data.allocate_caller_stack_slot();
+        // let ret_stack_var = Variable::Stack(ret_stack_slot);
+        // ret.variable = ret_stack_var;
+        unimplemented!();
     }
 
     // Modify every use of the proc parameters so they use the stack variable.
@@ -314,7 +315,7 @@ fn store_stack_rets(proc: &mut Procedure) {
 
     // Insert appropriate store instructions for stack allocated return values
 
-    Peephole::peep_instructions(proc, |ph, i, instr| {
+    Peephole::peep_instructions(proc, |ph, _i, instr| {
         if instr.opcode != Opcode::Ret {
             return;
         }
@@ -329,11 +330,12 @@ fn store_stack_rets(proc: &mut Procedure) {
 
         assert_eq!(operand_count, returns.len());
 
-        for (operand, ret_param) in instr.operands_mut().zip(returns) {
-            if let Some(stack_slot_id) = ret_param.variable.as_stack() {
-                ph.insert_before(i, Instruction::store(stack_slot_id, *operand));
-                *operand = Operand::Var(ret_param.variable);
-            }
+        for (_operand, _ret_param) in instr.operands_mut().zip(returns) {
+            // if let Some(stack_slot_id) = ret_param.variable.as_stack() {
+            //     ph.insert_before(i, Instruction::store(stack_slot_id, *operand));
+            //     *operand = Operand::Var(ret_param.variable);
+            // }
+            unimplemented!();
         }
     });
 }

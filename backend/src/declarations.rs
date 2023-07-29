@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     callconv::CallingConventionId,
     interner::{Interner, Symbol},
-    procedure::Procedure,
+    procedure::{ExternalProcedure, Procedure},
 };
 
 #[derive(Debug, Default)]
@@ -44,6 +44,30 @@ impl Declarations {
             parameters,
             returns,
             calling_convention: procedure.signature.calling_convention,
+        };
+
+        self.procedures.insert(name, procdecl);
+    }
+
+    pub fn declare_external_procedure(&mut self, procedure: &ExternalProcedure) {
+        let name = self.symbols.get_or_intern(&procedure.name);
+        let parameters = procedure
+            .parameters
+            .iter()
+            .map(|_param| ProcedureParameter { typ: () })
+            .collect();
+        let returns = procedure
+            .returns
+            .iter()
+            .map(|_ret| ProcedureReturn { typ: () })
+            .collect();
+
+        let procdecl = ProcedureDeclaration {
+            external: false,
+            name,
+            parameters,
+            returns,
+            calling_convention: Some(procedure.calling_convention),
         };
 
         self.procedures.insert(name, procdecl);

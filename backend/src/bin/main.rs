@@ -45,6 +45,10 @@ fn handle_module(mut module: Module) {
         proc.signature.calling_convention = Some(CallingConventionId::SysV);
         context.declarations.declare_procedure(&proc);
     }
+    for exproc in module.external_procedures.iter_mut() {
+        exproc.calling_convention = CallingConventionId::SysV;
+        context.declarations.declare_external_procedure(&exproc);
+    }
 
     for proc in module.procedures.iter_mut() {
         // allstack_allocate_parameters_and_return(proc);

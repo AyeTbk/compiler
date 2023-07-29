@@ -8,8 +8,16 @@ pub type StackId = u32;
 pub struct Signature {
     pub name: String,
     // pub parameters: Vec<Parameter>, // Find it in proc.blocks
-    pub returns: Vec<Parameter>,
+    pub returns: Vec<Typ>,
     pub calling_convention: Option<CallingConventionId>,
+}
+
+#[derive(Debug)]
+pub struct ExternalProcedure {
+    pub name: String,
+    pub parameters: Vec<Typ>,
+    pub returns: Vec<Typ>,
+    pub calling_convention: CallingConventionId,
 }
 
 #[derive(Debug)]

@@ -40,27 +40,56 @@ impl<'a> Parser<'a> {
         let mut module = Module::default();
 
         while self.tokens.peek().is_some() {
-            let proc = match self.parse_proc() {
-                Ok(proc) => proc,
+            match self.parse_module_item() {
+                Ok(module_item) => match module_item {
+                    ModuleItem::Proc(proc) => module.procedures.push(proc),
+                    ModuleItem::ExternProc(exproc) => module.external_procedures.push(exproc),
+                },
                 Err(err) => {
                     self.add_error(err);
                     if self
-                        .try_recover([RecoveryStrategy::Keyword("proc")])
+                        .try_recover([
+                            RecoveryStrategy::Keyword("proc"),
+                            RecoveryStrategy::Keyword("extern"),
+                        ])
                         .is_err()
                     {
                         // Having failed to recover, there is no choice but to give up on parsing.
                         break;
                     }
-                    continue;
                 }
-            };
-            module.procedures.push(proc);
+            }
         }
 
         Ok(module)
     }
 
+    fn parse_module_item(&mut self) -> Result<ModuleItem<'a>, Error<'a>> {
+        let token = self.predict_token()?;
+        match token.text {
+            "proc" => Ok(ModuleItem::Proc(self.parse_proc()?)),
+            "extern" => Ok(ModuleItem::ExternProc(self.parse_extern()?)),
+            _ => Err(Error::unexpected(
+                ExpectedKind::Keywords(vec!["proc", "extern"]),
+                token,
+            )),
+        }
+    }
+
     fn parse_proc(&mut self) -> Result<Procedure<'a>, Error<'a>> {
+        let signature = self.parse_proc_signature()?;
+        let blocks = self.parse_proc_body()?;
+        Ok(Procedure { signature, blocks })
+    }
+
+    fn parse_extern(&mut self) -> Result<ProcedureSignature<'a>, Error<'a>> {
+        self.expect_keyword("extern")?;
+        let sig = self.parse_proc_signature()?;
+        self.expect_separator(";")?;
+        Ok(sig)
+    }
+
+    fn parse_proc_signature(&mut self) -> Result<ProcedureSignature<'a>, Error<'a>> {
         self.expect_keyword("proc")?;
 
         let name = self
@@ -70,18 +99,15 @@ impl<'a> Parser<'a> {
 
         let returns = if self.predict_keyword("->")? {
             self.read_token();
-            self.parse_parameter_list()?
+            vec![self.expect_any_alphanumeric(ExpectedKind::TypeName)?.span()]
         } else {
             vec![]
         };
 
-        let blocks = self.parse_proc_body()?;
-
-        Ok(Procedure {
+        Ok(ProcedureSignature {
             name,
             parameters,
             returns,
-            blocks,
         })
     }
 
@@ -90,10 +116,20 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_parameter(&mut self) -> Result<Parameter<'a>, Error<'a>> {
-        let name = self
+        let first = self
             .expect_any_alphanumeric(ExpectedKind::RegisterName)?
             .span();
-        let typ = self.parse_typ_annotation()?;
+        let maybe_second = if self.predict_keyword(":")? {
+            Some(self.parse_typ_annotation()?)
+        } else {
+            None
+        };
+
+        let (name, typ) = if let Some(second) = maybe_second {
+            (Some(first), second)
+        } else {
+            (None, first)
+        };
 
         Ok(Parameter { name, typ })
     }
@@ -388,6 +424,23 @@ impl<'a> Parser<'a> {
             .ok_or(Error::unexpected_end_of_file("token"))
     }
 
+    fn expect_separator(&mut self, keyword: &'static str) -> Result<Token<'a>, Error<'a>> {
+        // only consume token if it corresponds to keyword.
+        // position error between current and next token.
+        let next_token = self
+            .predict_token()
+            .map_eof_err_to(Error::unexpected_end_of_file(keyword))?;
+        if next_token.text == keyword {
+            self.read_token();
+            Ok(next_token)
+        } else {
+            let mut err_token = next_token;
+            err_token.start = self.current_token().end;
+            err_token.end = self.current_token().end + 1;
+            Err(Error::unexpected(keyword, err_token))
+        }
+    }
+
     fn expect_keyword(&mut self, keyword: &'static str) -> Result<Token<'a>, Error<'a>> {
         // only consume token if it corresponds to keyword
         let token = self
@@ -424,7 +477,6 @@ impl<'a> Parser<'a> {
             self.read_token();
             Ok(token)
         } else {
-            dbg!(token);
             Err(Error::unexpected(what, token))
         }
     }
@@ -432,6 +484,16 @@ impl<'a> Parser<'a> {
     fn expect_token(&mut self) -> Result<Token<'a>, Error<'a>> {
         self.read_token()
             .ok_or(Error::unexpected_end_of_file("token"))
+    }
+
+    /// Peek next token, then, either read and return it if it's an Alphanumeric, or return None.
+    /// Return None if there is no next token.
+    fn _read_maybe_any_alphanumeric(&mut self) -> Option<Token<'a>> {
+        if self.peek_token()?.kind == TokenKind::Alphanumeric {
+            self.read_token()
+        } else {
+            None
+        }
     }
 
     fn read_token(&mut self) -> Option<Token<'a>> {
@@ -448,6 +510,11 @@ impl<'a> Parser<'a> {
         self.current_token
             .expect("this method shouldn't be called before reading/expecting a token")
     }
+}
+
+enum ModuleItem<'a> {
+    Proc(Procedure<'a>),
+    ExternProc(ProcedureSignature<'a>),
 }
 
 enum Separator {

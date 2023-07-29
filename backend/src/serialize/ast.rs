@@ -1,19 +1,25 @@
 #[derive(Debug, Default)]
 pub struct Module<'a> {
+    pub external_procedures: Vec<ProcedureSignature<'a>>,
     pub procedures: Vec<Procedure<'a>>,
 }
 
 #[derive(Debug)]
 pub struct Procedure<'a> {
-    pub name: Span<'a>,
-    pub parameters: Vec<Parameter<'a>>,
-    pub returns: Vec<Parameter<'a>>,
+    pub signature: ProcedureSignature<'a>,
     pub blocks: Vec<Block<'a>>,
 }
 
 #[derive(Debug)]
-pub struct Parameter<'a> {
+pub struct ProcedureSignature<'a> {
     pub name: Span<'a>,
+    pub parameters: Vec<Parameter<'a>>,
+    pub returns: Vec<Span<'a>>,
+}
+
+#[derive(Debug)]
+pub struct Parameter<'a> {
+    pub name: Option<Span<'a>>,
     pub typ: Span<'a>,
 }
 
