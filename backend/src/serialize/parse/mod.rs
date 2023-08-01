@@ -6,7 +6,7 @@ use super::lexer::{self, *};
 pub mod error;
 use error::*;
 
-const KEYWORDS: &'static [&'static str] = &["proc", "if"];
+const KEYWORDS: &'static [&'static str] = &["proc", "extern", "data", "const", "if"];
 
 pub fn parse<'a>(src: &'a str) -> ParsingResult<'a> {
     Parser::new(src).parse()
@@ -44,6 +44,7 @@ impl<'a> Parser<'a> {
                 Ok(module_item) => match module_item {
                     ModuleItem::Proc(proc) => module.procedures.push(proc),
                     ModuleItem::ExternProc(exproc) => module.external_procedures.push(exproc),
+                    ModuleItem::Data(data) => module.data.push(data),
                 },
                 Err(err) => {
                     self.add_error(err);
@@ -51,6 +52,7 @@ impl<'a> Parser<'a> {
                         .try_recover([
                             RecoveryStrategy::Keyword("proc"),
                             RecoveryStrategy::Keyword("extern"),
+                            RecoveryStrategy::Keyword("data"),
                         ])
                         .is_err()
                     {
@@ -69,8 +71,9 @@ impl<'a> Parser<'a> {
         match token.text {
             "proc" => Ok(ModuleItem::Proc(self.parse_proc()?)),
             "extern" => Ok(ModuleItem::ExternProc(self.parse_extern()?)),
+            "data" => Ok(ModuleItem::Data(self.parse_data()?)),
             _ => Err(Error::unexpected(
-                ExpectedKind::Keywords(vec!["proc", "extern"]),
+                ExpectedKind::Keywords(vec!["proc", "extern", "data"]),
                 token,
             )),
         }
@@ -87,6 +90,18 @@ impl<'a> Parser<'a> {
         let sig = self.parse_proc_signature()?;
         self.expect_separator(";")?;
         Ok(sig)
+    }
+
+    fn parse_data(&mut self) -> Result<Data<'a>, Error<'a>> {
+        self.expect_keyword("data")?;
+        let name = self
+            .expect_any_alphanumeric(ExpectedKind::Identifier)?
+            .span();
+        let typ = self.parse_typ_annotation()?;
+        self.expect_keyword("=")?;
+        let value = self.expect_token()?.span();
+        self.expect_separator(";")?;
+        Ok(Data { name, value, typ })
     }
 
     fn parse_proc_signature(&mut self) -> Result<ProcedureSignature<'a>, Error<'a>> {
@@ -515,6 +530,7 @@ impl<'a> Parser<'a> {
 enum ModuleItem<'a> {
     Proc(Procedure<'a>),
     ExternProc(ProcedureSignature<'a>),
+    Data(Data<'a>),
 }
 
 enum Separator {

@@ -61,6 +61,7 @@ impl<'a> Error<'a> {
 pub enum ExpectedKind {
     Keyword(&'static str),
     Keywords(Vec<&'static str>),
+    Identifier,
     ProcedureName,
     Block,
     BlockName,
