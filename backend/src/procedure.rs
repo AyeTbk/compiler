@@ -3,6 +3,7 @@ use crate::{callconv::CallingConventionId, instruction::Instruction};
 pub type VirtualId = u32;
 pub type RegisterId = u32;
 pub type StackId = u32;
+pub type DataId = u32;
 
 #[derive(Debug, Clone)]
 pub struct Signature {
@@ -243,6 +244,7 @@ pub enum Variable {
     Virtual(VirtualId),
     Register(RegisterId),
     Stack(StackId),
+    Data(DataId),
 }
 
 impl Variable {

@@ -4,6 +4,7 @@ use super::Error;
 use crate::callconv::CallingConventionId;
 use crate::instruction::Condition;
 use crate::instruction::Target;
+use crate::module::Data;
 use crate::procedure::ExternalProcedure;
 use crate::procedure::StackData;
 use crate::procedure::StackId;
@@ -39,12 +40,6 @@ impl ConverterAstToModule {
     }
 
     fn ast_module_to_module(&mut self, ast_module: &ast::Module) -> Result<Module, Error> {
-        let mut procedures = Vec::new();
-        for ast_proc in &ast_module.procedures {
-            let proc = self.ast_proc_to_proc(ast_proc)?;
-            procedures.push(proc);
-        }
-
         let mut external_procedures = Vec::new();
         for ast_exproc in &ast_module.external_procedures {
             // let exproc = self.ast_exproc_to_exproc(ast_proc)?;
@@ -57,8 +52,32 @@ impl ConverterAstToModule {
             external_procedures.push(exproc);
         }
 
+        let mut data = Vec::new();
+        for ast_data in &ast_module.data {
+            let expected_id = data.len();
+            let actual_id = ast_data
+                .name
+                .text
+                .strip_prefix('d')
+                .unwrap()
+                .parse::<u32>()
+                .unwrap();
+            assert_eq!(expected_id, actual_id as usize);
+            let datum = Data {
+                value: ast_data.value.text.parse::<u64>().unwrap(),
+            };
+            data.push(datum);
+        }
+
+        let mut procedures = Vec::new();
+        for ast_proc in &ast_module.procedures {
+            let proc = self.ast_proc_to_proc(ast_proc)?;
+            procedures.push(proc);
+        }
+
         Ok(Module {
             external_procedures,
+            data,
             procedures,
         })
     }
@@ -251,6 +270,7 @@ impl ConverterAstToModule {
     fn ast_instruction_to_instruction(
         ast_instruction: &ast::Instruction,
     ) -> Result<Instruction, Error> {
+        let opcode = Self::ast_opcode_to_opcode(&ast_instruction.opcode)?;
         let (src, target) = if let Some(ast_target) = &ast_instruction.target {
             let src = SourceOperands {
                 operands: ast_map(&ast_target.arguments, Self::ast_operand_to_operand)?,
@@ -269,13 +289,15 @@ impl ConverterAstToModule {
             };
             (src, None)
         };
+        let dst = ast_map_option(&ast_instruction.destination, Self::ast_variable_to_variable)?;
+        let cond = ast_map_option(&ast_instruction.condition, Self::ast_condition_to_condition)?;
 
         Ok(Instruction {
-            opcode: Self::ast_opcode_to_opcode(&ast_instruction.opcode)?,
+            opcode,
             src,
-            dst: ast_map_option(&ast_instruction.destination, Self::ast_variable_to_variable)?,
+            dst,
             target,
-            cond: ast_map_option(&ast_instruction.condition, Self::ast_condition_to_condition)?,
+            cond,
         })
     }
 
@@ -307,7 +329,7 @@ impl ConverterAstToModule {
     }
 
     fn ast_variable_to_variable(ast_variable: &ast::Span) -> Result<Variable, Error> {
-        if let Some((_, id_str)) = ast_variable.text.split_once(&['v', 'r', 's']) {
+        if let Some((_, id_str)) = ast_variable.text.split_once(&['v', 'r', 's', 'd']) {
             let id = id_str.parse::<u32>().map_err(|_| {
                 Error::new(
                     format!(
@@ -324,6 +346,8 @@ impl ConverterAstToModule {
                 Variable::Register(id)
             } else if ast_variable.text.starts_with("s") {
                 Variable::Stack(id)
+            } else if ast_variable.text.starts_with("d") {
+                Variable::Data(id)
             } else {
                 unreachable!("if this is actually reachable, rewrite this whole function plz");
             };
@@ -332,7 +356,7 @@ impl ConverterAstToModule {
         } else {
             Err(Error::new(
                 format!(
-                    "invalid variable kind `{}`, expected `v`, `r` or `s`",
+                    "invalid variable kind `{}`, expected `v`, `r`, `s` or `d`",
                     ast_variable.text
                 ),
                 ast_variable,

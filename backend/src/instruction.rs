@@ -8,7 +8,7 @@ pub use opcode::Opcode;
 pub struct Instruction {
     pub opcode: Opcode,
     pub src: SourceOperands,
-    pub dst: Option<Variable>, // TODO Consider supporting multiple returns
+    pub dst: Option<Variable>,
     pub target: Option<Target>,
     pub cond: Option<Condition>,
 }

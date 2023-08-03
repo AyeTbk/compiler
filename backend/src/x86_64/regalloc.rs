@@ -148,7 +148,7 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
     }
 
     let do_alloc = |variable: &mut Variable| {
-        let var = variable.as_virtual().unwrap();
+        let Some(var) = variable.as_virtual() else { return };
         let alloc = allocs.allocations.get(&var).unwrap();
         match alloc {
             Allocation::Register(reg) => {
@@ -183,10 +183,10 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
         }
     });
 
-    correct_move_load_stores(proc);
+    correct_moves_loads_stores(proc);
 }
 
-fn correct_move_load_stores(proc: &mut Procedure) {
+fn correct_moves_loads_stores(proc: &mut Procedure) {
     // Corrections:
     // sX = move rY   =>   change opcode to Store.
     // rX = move sY   =>   change opcode to Load.

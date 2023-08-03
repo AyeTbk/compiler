@@ -9,7 +9,7 @@ use compiler::{
 };
 
 fn main() -> ExitCode {
-    let source_name = "data/errors.ayir";
+    let source_name = "data/example.ayir";
     let source = std::fs::read_to_string(source_name).unwrap();
 
     let mut errors = Vec::new();
@@ -51,16 +51,11 @@ fn handle_module(mut module: Module) {
     }
 
     for proc in module.procedures.iter_mut() {
-        // allstack_allocate_parameters_and_return(proc);
-        // allstack_setup_callees(&module.declarations, proc);
-        // spill_all_virtual(proc);
-        // generate_loads_stores(proc);
-        // fix_memory_to_memory_loads_stores(proc);
         x86_64::regalloc::allocate_registers(proc, &context);
     }
 
-    let s = serialize::convert::convert_module_to_string(&module);
-    // let s = x86_64::assembly::generate_assembly(&module, &context);
+    // let s = serialize::convert::convert_module_to_string(&module);
+    let s = x86_64::assembly::generate_assembly(&module, &context);
 
     println!("{}", s);
 

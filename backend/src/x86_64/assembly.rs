@@ -2,7 +2,7 @@ use crate::{
     context::Context,
     instruction::{Condition, Instruction, Opcode, Operand},
     module::Module,
-    procedure::{Block, Procedure, Variable},
+    procedure::{Block, DataId, Procedure, Variable},
 };
 
 pub fn generate_assembly(module: &Module, context: &Context) -> String {
@@ -10,6 +10,8 @@ pub fn generate_assembly(module: &Module, context: &Context) -> String {
 
     buf.push_str(
         r#"
+.text
+
 #.global _start
 #_start:
 #    call main
@@ -35,20 +37,27 @@ _handle_fallthrough:
         if i != 0 {
             buf.push_str("\n\n");
         }
-        generate_proc_assembly(&proc, context, &mut buf);
+        generate_proc_assembly(module, &proc, context, &mut buf);
+    }
+
+    buf.push_str("\n\n.data\n\n");
+
+    for (i, data) in module.data.iter().enumerate() {
+        let data_label = make_data_label(i as DataId);
+        buf.push_str(&format!("{}: .quad {}\n", data_label, data.value));
     }
 
     return buf;
 }
 
-fn generate_proc_assembly(proc: &Procedure, context: &Context, buf: &mut String) {
+fn generate_proc_assembly(module: &Module, proc: &Procedure, context: &Context, buf: &mut String) {
     buf.push_str(&format!(".global {}\n", proc.signature.name));
     buf.push_str(&format!("{}:\n", proc.signature.name));
 
     generate_proc_prologue(proc, buf);
 
     for block in proc.blocks.iter() {
-        generate_block_assembly(proc, block, context, buf);
+        generate_block_assembly(module, proc, block, context, buf);
     }
 
     generate_fallthrough_catch(proc, buf);
@@ -67,18 +76,25 @@ fn generate_fallthrough_catch(_proc: &Procedure, buf: &mut String) {
     buf.push_str("    jmp _handle_fallthrough\n");
 }
 
-fn generate_block_assembly(proc: &Procedure, block: &Block, context: &Context, buf: &mut String) {
+fn generate_block_assembly(
+    module: &Module,
+    proc: &Procedure,
+    block: &Block,
+    context: &Context,
+    buf: &mut String,
+) {
     if block.name != "entry" {
         let block_label = make_block_label(proc, &block.name);
         buf.push_str(&format!("{}:\n", block_label));
     }
 
     for instr in &block.instructions {
-        generate_instruction_assembly(proc, block, instr, context, buf);
+        generate_instruction_assembly(module, proc, block, instr, context, buf);
     }
 }
 
 fn generate_instruction_assembly(
+    module: &Module,
     proc: &Procedure,
     block: &Block,
     instr: &Instruction,
@@ -86,24 +102,32 @@ fn generate_instruction_assembly(
     buf: &mut String,
 ) {
     match instr.opcode {
-        Opcode::Load | Opcode::Store | Opcode::Move => generate_mov(proc, instr, context, buf),
-        Opcode::Add | Opcode::Sub => generate_binary_instruction(proc, instr, context, buf),
-        Opcode::Jump => generate_jump(proc, block, instr, context, buf),
+        Opcode::Load | Opcode::Store | Opcode::Move => {
+            generate_mov(module, proc, instr, context, buf)
+        }
+        Opcode::Add | Opcode::Sub => generate_binary_instruction(module, proc, instr, context, buf),
+        Opcode::Jump => generate_jump(module, proc, block, instr, context, buf),
         Opcode::Call => generate_call(instr, buf),
         Opcode::Ret => generate_ret(buf),
         op => unimplemented!("{:?}", op),
     }
 }
 
-fn generate_mov(proc: &Procedure, instr: &Instruction, context: &Context, buf: &mut String) {
+fn generate_mov(
+    module: &Module,
+    proc: &Procedure,
+    instr: &Instruction,
+    context: &Context,
+    buf: &mut String,
+) {
     buf.push_str("    movq ");
 
     let src = *instr.operands().next().unwrap();
-    generate_operand_assembly(proc, src, context, buf);
+    generate_operand_assembly(module, proc, src, context, buf);
     buf.push_str(", ");
 
     let dst = instr.dst.unwrap();
-    generate_operand_assembly(proc, Operand::Var(dst), context, buf);
+    generate_operand_assembly(module, proc, Operand::Var(dst), context, buf);
 
     buf.push_str("\n");
 }
@@ -127,6 +151,7 @@ fn _generate_nullary_instruction(instr: &Instruction, buf: &mut String) {
 }
 
 fn generate_binary_instruction(
+    module: &Module,
     proc: &Procedure,
     instr: &Instruction,
     context: &Context,
@@ -140,13 +165,14 @@ fn generate_binary_instruction(
         if i != 0 {
             buf.push_str(", ");
         }
-        generate_operand_assembly(proc, *operand, context, buf);
+        generate_operand_assembly(module, proc, *operand, context, buf);
     }
 
     buf.push_str("\n");
 }
 
 fn generate_jump(
+    module: &Module,
     proc: &Procedure,
     _block: &Block,
     instr: &Instruction,
@@ -159,9 +185,9 @@ fn generate_jump(
         // Imm values can only be in the first operand
 
         let (first, second) = if a.is_immediate() { (a, b) } else { (b, a) };
-        generate_operand_assembly(proc, first, context, buf);
+        generate_operand_assembly(module, proc, first, context, buf);
         buf.push_str(", ");
-        generate_operand_assembly(proc, second, context, buf);
+        generate_operand_assembly(module, proc, second, context, buf);
         buf.push_str("\n");
     }
 
@@ -175,6 +201,7 @@ fn generate_jump(
 }
 
 fn generate_operand_assembly(
+    _module: &Module,
     proc: &Procedure,
     operand: Operand,
     context: &Context,
@@ -190,10 +217,18 @@ fn generate_operand_assembly(
             let offset = proc.data.stack_data.stack_var_memory_offset(stack_slot_id);
             buf.push_str(&format!("{}(%rbp)", offset));
         }
+        Operand::Var(Variable::Data(data_id)) => {
+            let data_label = make_data_label(data_id);
+            buf.push_str(&format!("({})", data_label));
+        }
         oprnd => unimplemented!("{:?}", oprnd),
     }
 }
 
 fn make_block_label(proc: &Procedure, block_name: &str) -> String {
     format!("{}_block_{}", proc.signature.name, block_name)
+}
+
+fn make_data_label(data_id: DataId) -> String {
+    format!("datum_d{}", data_id)
 }

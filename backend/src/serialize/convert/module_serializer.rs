@@ -2,8 +2,11 @@ use std::fmt::{Arguments, Error as FmtError, Write};
 
 use crate::{
     instruction::{Condition, Instruction, Operand, Target},
-    module::Module,
-    procedure::{Block, Parameter, Procedure, StackData, StackSlotKind, StackVar, Variable},
+    module::{Data, Module},
+    procedure::{
+        Block, DataId, ExternalProcedure, Parameter, Procedure, StackData, StackSlotKind, StackVar,
+        Variable,
+    },
 };
 
 type Result = std::result::Result<(), FmtError>;
@@ -30,10 +33,30 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     }
 
     fn serialize_module(&mut self, module: &Module) -> Result {
+        for exproc in &module.external_procedures {
+            self.serialize_extern_proc(exproc)?;
+            self.writeln()?;
+        }
+
+        self.writeln()?;
+
+        for (i, data) in module.data.iter().enumerate() {
+            self.serialize_data(data, i as DataId)?;
+            self.writeln()?;
+        }
+
+        self.writeln()?;
+
         for proc in &module.procedures {
             self.serialize_proc(proc)?;
             self.writeln()?;
         }
+
+        Ok(())
+    }
+
+    fn serialize_data(&mut self, data: &Data, data_id: DataId) -> Result {
+        self.write_fmt(format_args!("data d{}: u64 = {};", data_id, data.value))?;
 
         Ok(())
     }
@@ -55,6 +78,25 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
             Ok(())
         })?;
 
+        Ok(())
+    }
+
+    fn serialize_extern_proc(&mut self, proc: &ExternalProcedure) -> Result {
+        self.write_fmt(format_args!("extern proc {}", proc.name))?;
+
+        self.write_str("(")?;
+        for (i, _param_typ) in proc.parameters.iter().enumerate() {
+            if i != 0 {
+                self.write_str(", ")?;
+            }
+            self.write_str("u64")?;
+        }
+        self.write_str(")")?;
+
+        if !proc.returns.is_empty() {
+            self.write_str(" -> u64")?;
+        }
+        self.write_str(";")?;
         Ok(())
     }
 
@@ -188,6 +230,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
             Variable::Virtual(id) => self.write_fmt(format_args!("v{id}")),
             Variable::Register(id) => self.write_fmt(format_args!("r{id}")),
             Variable::Stack(id) => self.write_fmt(format_args!("s{id}")),
+            Variable::Data(id) => self.write_fmt(format_args!("d{id}")),
         }
     }
 
