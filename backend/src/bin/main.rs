@@ -54,10 +54,11 @@ fn handle_module(mut module: Module) {
         x86_64::regalloc::allocate_registers(proc, &context);
     }
 
-    // let s = serialize::convert::convert_module_to_string(&module);
-    let s = x86_64::assembly::generate_assembly(&module, &context);
-
-    println!("{}", s);
-
-    //dbg!(module);
+    if std::env::args().any(|a| a == "--asm") {
+        let s = x86_64::assembly::generate_assembly(&module, &context);
+        println!("{}", s);
+    } else {
+        let s = serialize::convert::convert_module_to_string(&module);
+        println!("{}", s);
+    }
 }
