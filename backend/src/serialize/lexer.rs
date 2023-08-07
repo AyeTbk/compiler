@@ -23,6 +23,7 @@ impl<'a> Token<'a> {
 pub enum TokenKind {
     Token,
     Alphanumeric,
+    Quoted,
     Comment,
 }
 
@@ -55,6 +56,9 @@ impl<'a> Lex<'a> {
             (j, text, TokenKind::Alphanumeric)
         } else if let Some((j, text)) = any_keyword_of(MULTICHAR_OPERATORS)(i) {
             // Multichar operator
+            (j, text, TokenKind::Token)
+        } else if let Some((j, text)) = pair(keyword("\""), take_to(|ch| ch == '"'))(i) {
+            // Quoted string
             (j, text, TokenKind::Token)
         } else if let Some((j, text)) = pair(keyword("//"), take_to(|ch| ch == '\n'))(i) {
             // Single line comment
@@ -171,12 +175,18 @@ fn take_with_predicate(
         let mut included_end_idx = 0;
         let mut excluded_end_idx = 0;
 
+        let mut didnt_match_predicate = true;
         for (idx, ch) in char_end_indices {
             included_end_idx = idx;
             if pred(ch) {
+                didnt_match_predicate = false;
                 break;
             }
             excluded_end_idx = idx;
+        }
+
+        if include_first_non_match && didnt_match_predicate {
+            return None;
         }
 
         let end_idx = if include_first_non_match {

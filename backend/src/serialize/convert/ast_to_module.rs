@@ -2,9 +2,10 @@ use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
 use crate::callconv::CallingConventionId;
+use crate::data::Data;
+use crate::data::Value;
 use crate::instruction::Condition;
 use crate::instruction::Target;
-use crate::module::Data;
 use crate::procedure::ExternalProcedure;
 use crate::procedure::StackData;
 use crate::procedure::StackId;
@@ -63,9 +64,14 @@ impl ConverterAstToModule {
                 .parse::<u32>()
                 .unwrap();
             assert_eq!(expected_id, actual_id as usize);
-            let datum = Data {
-                value: ast_data.value.text.parse::<u64>().unwrap(),
+            let value = if ast_data.value.text.starts_with('"') {
+                let bytes = quoted_to_bytes(ast_data.value.text);
+                Value::Bytes(bytes)
+            } else {
+                let v = ast_data.value.text.parse::<u64>().unwrap();
+                Value::U64(v)
             };
+            let datum = Data { value };
             data.push(datum);
         }
 
@@ -393,6 +399,30 @@ fn ast_map_option<T, U>(
     } else {
         Ok(None)
     }
+}
+
+fn quoted_to_bytes(quoted: &str) -> Vec<u8> {
+    let s = quoted.strip_prefix('"').unwrap();
+    let s = s.strip_suffix('"').unwrap();
+
+    let mut bytes = Vec::new();
+    let mut escaping = false;
+    for byte in s.bytes() {
+        if escaping {
+            escaping = false;
+            match byte {
+                b'0' => bytes.push(0),
+                b'n' => bytes.push(b'\n'),
+                b => bytes.push(b),
+            }
+        } else if byte == b'\\' {
+            escaping = true;
+        } else {
+            bytes.push(byte);
+        }
+    }
+
+    bytes
 }
 
 enum StackDataItem {

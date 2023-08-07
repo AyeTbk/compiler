@@ -1,8 +1,9 @@
 use std::fmt::{Arguments, Error as FmtError, Write};
 
 use crate::{
+    data::{Data, Value},
     instruction::{Condition, Instruction, Operand, Target},
-    module::{Data, Module},
+    module::Module,
     procedure::{
         Block, DataId, ExternalProcedure, Parameter, Procedure, StackData, StackSlotKind, StackVar,
         Variable,
@@ -42,7 +43,6 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
 
         for (i, data) in module.data.iter().enumerate() {
             self.serialize_data(data, i as DataId)?;
-            self.writeln()?;
         }
 
         self.writeln()?;
@@ -56,7 +56,17 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     }
 
     fn serialize_data(&mut self, data: &Data, data_id: DataId) -> Result {
-        self.write_fmt(format_args!("data d{}: u64 = {};", data_id, data.value))?;
+        self.write_fmt(format_args!("data d{}: u64 = ", data_id))?;
+
+        match &data.value {
+            Value::U64(v) => self.write_fmt(format_args!("{}", v))?,
+            Value::Bytes(v) => {
+                let s = String::from_utf8(v.clone()).unwrap();
+                self.write_fmt(format_args!("{:?}", s))?
+            }
+        }
+
+        self.writeln_str(";")?;
 
         Ok(())
     }

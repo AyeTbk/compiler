@@ -37,6 +37,7 @@ define_opcodes! {
     InvalidInstruction, // Useless. Used for recoverable parsing.
     Store, // Store to a memory location.
     Load, // Load from a memory location.
+    Address, // Get the address of a stack or data variable. Using it on a virtual will force it to be spilled.
     Move, // Move an operand value to a variable. Used for register allocation.
     Call, // Call a procedure.
     Ret, // Return from a procedure.

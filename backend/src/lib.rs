@@ -1,5 +1,6 @@
 pub mod callconv;
 pub mod context;
+pub mod data;
 pub mod declarations;
 pub mod error_reporting;
 pub mod instruction;

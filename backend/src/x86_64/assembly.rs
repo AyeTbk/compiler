@@ -1,5 +1,6 @@
 use crate::{
     context::Context,
+    data::Value,
     instruction::{Condition, Instruction, Opcode, Operand},
     module::Module,
     procedure::{Block, DataId, Procedure, Variable},
@@ -44,7 +45,23 @@ _handle_fallthrough:
 
     for (i, data) in module.data.iter().enumerate() {
         let data_label = make_data_label(i as DataId);
-        buf.push_str(&format!("{}: .quad {}\n", data_label, data.value));
+        buf.push_str(&format!("{}: ", data_label));
+
+        match &data.value {
+            Value::U64(v) => {
+                buf.push_str(&format!(".quad {}", v));
+            }
+            Value::Bytes(v) => {
+                buf.push_str(".byte ");
+                for (i, byte) in v.iter().enumerate() {
+                    if i != 0 {
+                        buf.push_str(", ");
+                    }
+                    buf.push_str(&format!("{}", byte));
+                }
+            }
+        };
+        buf.push_str("\n");
     }
 
     return buf;
@@ -109,12 +126,37 @@ fn generate_instruction_assembly(
         Opcode::Jump => generate_jump(module, proc, block, instr, context, buf),
         Opcode::Call => generate_call(instr, buf),
         Opcode::Ret => generate_ret(buf),
+        Opcode::Address => generate_address_instruction(module, proc, instr, context, buf),
         op => unimplemented!("{:?}", op),
     }
 }
 
+fn generate_address_instruction(
+    _module: &Module,
+    proc: &Procedure,
+    instr: &Instruction,
+    context: &Context,
+    buf: &mut String,
+) {
+    buf.push_str("    leaq ");
+
+    let src = *instr.operands().next().unwrap();
+    match src {
+        Operand::Var(Variable::Data(data_id)) => {
+            buf.push_str(&make_data_label(data_id));
+        }
+        _ => unimplemented!(),
+    }
+    buf.push_str(", ");
+
+    let dst = instr.dst.unwrap();
+    generate_operand_assembly(proc, Operand::Var(dst), context, buf);
+
+    buf.push_str("\n");
+}
+
 fn generate_mov(
-    module: &Module,
+    _module: &Module,
     proc: &Procedure,
     instr: &Instruction,
     context: &Context,
@@ -123,11 +165,11 @@ fn generate_mov(
     buf.push_str("    movq ");
 
     let src = *instr.operands().next().unwrap();
-    generate_operand_assembly(module, proc, src, context, buf);
+    generate_operand_assembly(proc, src, context, buf);
     buf.push_str(", ");
 
     let dst = instr.dst.unwrap();
-    generate_operand_assembly(module, proc, Operand::Var(dst), context, buf);
+    generate_operand_assembly(proc, Operand::Var(dst), context, buf);
 
     buf.push_str("\n");
 }
@@ -151,7 +193,7 @@ fn _generate_nullary_instruction(instr: &Instruction, buf: &mut String) {
 }
 
 fn generate_binary_instruction(
-    module: &Module,
+    _module: &Module,
     proc: &Procedure,
     instr: &Instruction,
     context: &Context,
@@ -165,14 +207,14 @@ fn generate_binary_instruction(
         if i != 0 {
             buf.push_str(", ");
         }
-        generate_operand_assembly(module, proc, *operand, context, buf);
+        generate_operand_assembly(proc, *operand, context, buf);
     }
 
     buf.push_str("\n");
 }
 
 fn generate_jump(
-    module: &Module,
+    _module: &Module,
     proc: &Procedure,
     _block: &Block,
     instr: &Instruction,
@@ -185,9 +227,9 @@ fn generate_jump(
         // Imm values can only be in the first operand
 
         let (first, second) = if a.is_immediate() { (a, b) } else { (b, a) };
-        generate_operand_assembly(module, proc, first, context, buf);
+        generate_operand_assembly(proc, first, context, buf);
         buf.push_str(", ");
-        generate_operand_assembly(module, proc, second, context, buf);
+        generate_operand_assembly(proc, second, context, buf);
         buf.push_str("\n");
     }
 
@@ -201,7 +243,6 @@ fn generate_jump(
 }
 
 fn generate_operand_assembly(
-    _module: &Module,
     proc: &Procedure,
     operand: Operand,
     context: &Context,
