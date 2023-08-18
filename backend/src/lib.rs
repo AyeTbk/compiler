@@ -11,5 +11,6 @@ pub mod passes;
 pub mod procedure;
 pub mod regalloc;
 pub mod serialize;
+pub mod r#type;
 pub mod utils;
 pub mod x86_64;

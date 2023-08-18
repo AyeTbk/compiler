@@ -1,4 +1,10 @@
-use crate::{callconv::CallingConventionId, instruction::Instruction};
+use std::collections::HashMap;
+
+use crate::{
+    callconv::CallingConventionId,
+    instruction::Instruction,
+    r#type::{IntegerType, Type},
+};
 
 pub type VirtualId = u32;
 pub type RegisterId = u32;
@@ -9,15 +15,15 @@ pub type DataId = u32;
 pub struct Signature {
     pub name: String,
     // pub parameters: Vec<Parameter>, // Find it in proc.blocks
-    pub returns: Vec<Typ>,
+    pub returns: Vec<Type>,
     pub calling_convention: Option<CallingConventionId>,
 }
 
 #[derive(Debug)]
 pub struct ExternalProcedure {
     pub name: String,
-    pub parameters: Vec<Typ>,
-    pub returns: Vec<Typ>,
+    pub parameters: Vec<Type>,
+    pub returns: Vec<Type>,
     pub calling_convention: CallingConventionId,
 }
 
@@ -32,9 +38,27 @@ pub struct Procedure {
 pub struct ProcedureData {
     pub stack_data: StackData,
     pub highest_virtual_id: VirtualId,
+    pub virtual_types: HashMap<VirtualId, Type>,
+    pub register_allocations: HashMap<VirtualId, RegisterId>,
 }
 
 impl ProcedureData {
+    pub fn stack_variable_type(&self, _stack_id: StackId) -> Option<Type> {
+        Some(Type::Integer(IntegerType::U64))
+    }
+
+    pub fn virtual_variable_type(&self, virt_id: VirtualId) -> Option<Type> {
+        self.virtual_types.get(&virt_id).cloned()
+    }
+
+    pub fn register_allocation(&self, virt_id: VirtualId) -> Option<RegisterId> {
+        self.register_allocations.get(&virt_id).copied()
+    }
+
+    pub fn set_register_allocation(&mut self, virt_id: VirtualId, reg_id: RegisterId) {
+        self.register_allocations.insert(virt_id, reg_id);
+    }
+
     pub fn acquire_new_virtual_variable(&mut self) -> Variable {
         Variable::Virtual(self.acquire_next_virtual_id())
     }
@@ -53,10 +77,10 @@ pub struct StackData {
 }
 
 impl StackData {
-    pub fn allocate_local_stack_slot(&mut self) -> StackId {
+    pub fn allocate_local_stack_slot(&mut self, typ: Type) -> StackId {
         let slot_id = self.slots.len();
         let stack_slot = StackSlot {
-            typ: Typ,
+            typ,
             kind: StackSlotKind::Local,
         };
         self.slots.push(stack_slot);
@@ -67,10 +91,10 @@ impl StackData {
         id.try_into().unwrap()
     }
 
-    pub fn allocate_caller_stack_slot(&mut self) -> StackId {
+    pub fn allocate_caller_stack_slot(&mut self, typ: Type) -> StackId {
         let slot_id = self.slots.len();
         let stack_slot = StackSlot {
-            typ: Typ,
+            typ,
             kind: StackSlotKind::Caller,
         };
         self.slots.push(stack_slot);
@@ -185,7 +209,7 @@ pub enum StackVar {
 
 #[derive(Debug)]
 pub struct StackSlot {
-    pub typ: Typ,
+    pub typ: Type,
     pub kind: StackSlotKind,
 }
 
@@ -236,13 +260,13 @@ pub struct Block {
 #[derive(Debug, Clone)]
 pub struct Parameter {
     pub variable: Variable,
-    pub typ: Typ,
+    pub typ: Type,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Variable {
     Virtual(VirtualId),
-    Register(RegisterId),
+    Register(RegisterId), // TODO remove register variant
     Stack(StackId),
     Data(DataId),
 }
@@ -273,6 +297,3 @@ impl Variable {
         }
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-pub struct Typ;

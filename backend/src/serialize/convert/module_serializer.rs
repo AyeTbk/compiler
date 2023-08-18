@@ -1,13 +1,17 @@
-use std::fmt::{Arguments, Error as FmtError, Write};
+use std::{
+    collections::HashMap,
+    fmt::{Arguments, Error as FmtError, Write},
+};
 
 use crate::{
     data::{Data, Value},
     instruction::{Condition, Instruction, Operand, Target},
     module::Module,
     procedure::{
-        Block, DataId, ExternalProcedure, Parameter, Procedure, StackData, StackSlotKind, StackVar,
-        Variable,
+        Block, DataId, ExternalProcedure, Parameter, Procedure, RegisterId, StackData,
+        StackSlotKind, StackVar, Variable, VirtualId,
     },
+    r#type::Type,
 };
 
 type Result = std::result::Result<(), FmtError>;
@@ -56,7 +60,9 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     }
 
     fn serialize_data(&mut self, data: &Data, data_id: DataId) -> Result {
-        self.write_fmt(format_args!("data d{}: u64 = ", data_id))?;
+        self.write_fmt(format_args!("data d{}", data_id))?;
+        self.serialize_type_annotation(&data.typ())?;
+        self.write_str(" = ")?;
 
         match &data.value {
             Value::U64(v) => self.write_fmt(format_args!("{}", v))?,
@@ -75,15 +81,18 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         self.write_fmt(format_args!("proc {}", proc.signature.name))?;
         self.serialize_parameter_list(&proc.blocks.entry.parameters)?;
         if !proc.signature.returns.is_empty() {
-            self.write_str(" -> u64")?;
+            self.write_str(" -> ")?;
+            let return_typ = proc.signature.returns.first().unwrap();
+            self.serialize_typ(return_typ)?;
         }
         self.write_str(" ")?;
 
         self.block(|this| {
-            this.serialize_stack_block(&proc.data.stack_data)?;
-            this.serialize_block(&proc.blocks.entry, true)?;
+            this.serialize_stack_block(&proc, &proc.data.stack_data)?;
+            this.serialize_regalloc_block(&proc.data.register_allocations)?;
+            this.serialize_block(proc, &proc.blocks.entry, true)?;
             for block in proc.blocks.others.iter() {
-                this.serialize_block(block, false)?;
+                this.serialize_block(proc, block, false)?;
             }
             Ok(())
         })?;
@@ -95,22 +104,28 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         self.write_fmt(format_args!("extern proc {}", proc.name))?;
 
         self.write_str("(")?;
-        for (i, _param_typ) in proc.parameters.iter().enumerate() {
+        for (i, param_typ) in proc.parameters.iter().enumerate() {
             if i != 0 {
                 self.write_str(", ")?;
             }
-            self.write_str("u64")?;
+            self.serialize_typ(param_typ)?;
         }
         self.write_str(")")?;
 
         if !proc.returns.is_empty() {
-            self.write_str(" -> u64")?;
+            self.write_str(" -> ")?;
+            let return_typ = proc.returns.first().unwrap();
+            self.serialize_typ(return_typ)?;
         }
         self.write_str(";")?;
         Ok(())
     }
 
-    fn serialize_stack_block(&mut self, stack_data: &StackData) -> Result {
+    fn serialize_typ(&mut self, typ: &Type) -> Result {
+        self.write_str(typ.as_str())
+    }
+
+    fn serialize_stack_block(&mut self, _proc: &Procedure, stack_data: &StackData) -> Result {
         if stack_data.slots.is_empty() {
             return Ok(());
         }
@@ -144,7 +159,28 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         })
     }
 
-    fn serialize_block(&mut self, block: &Block, is_entry: bool) -> Result {
+    fn serialize_regalloc_block(
+        &mut self,
+        register_allocations: &HashMap<VirtualId, RegisterId>,
+    ) -> Result {
+        if register_allocations.is_empty() {
+            return Ok(());
+        }
+
+        self.write_str("regalloc ")?;
+        self.block(|this| {
+            let mut regallocs = register_allocations.iter().collect::<Vec<_>>();
+            regallocs.sort_by_key(|&(v, _)| *v);
+
+            for (virt, reg) in regallocs {
+                this.writeln_str(&format!("v{} = r{};", virt, reg))?;
+            }
+
+            Ok(())
+        })
+    }
+
+    fn serialize_block(&mut self, proc: &Procedure, block: &Block, is_entry: bool) -> Result {
         self.write_fmt(format_args!("{}", block.name))?;
         if !is_entry {
             self.serialize_parameter_list(&block.parameters)?;
@@ -152,7 +188,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         self.write_str(" ")?;
         self.block(|this| {
             for instruction in block.instructions.iter() {
-                this.serialize_instruction(instruction)?;
+                this.serialize_instruction(proc, instruction)?;
                 this.writeln()?;
             }
             Ok(())
@@ -166,14 +202,21 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
                 self.write_str(", ")?;
             }
             self.serialize_variable(&parameter.variable)?;
-            self.serialize_type_annotation()?;
+            self.serialize_type_annotation(&parameter.typ)?;
         }
         self.write_str(")")
     }
 
-    fn serialize_instruction(&mut self, instruction: &Instruction) -> Result {
+    fn serialize_instruction(&mut self, proc: &Procedure, instruction: &Instruction) -> Result {
         if let Some(dst) = &instruction.dst {
             self.serialize_variable(dst)?;
+
+            if let Some(virt_id) = dst.as_virtual() {
+                if let Some(typ) = proc.data.virtual_variable_type(virt_id) {
+                    self.serialize_type_annotation(&typ)?;
+                }
+            }
+
             self.write_str(" = ")?;
         }
         self.write_str(instruction.opcode.to_str())?;
@@ -244,8 +287,9 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         }
     }
 
-    fn serialize_type_annotation(&mut self) -> Result {
-        self.write_str(": u64")
+    fn serialize_type_annotation(&mut self, typ: &Type) -> Result {
+        self.write_str(": ")?;
+        self.serialize_typ(typ)
     }
 
     fn indent(&mut self) {

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::ast;
 use super::ConvertAstToModuleResult;
 use super::Error;
@@ -7,13 +9,16 @@ use crate::data::Value;
 use crate::instruction::Condition;
 use crate::instruction::Target;
 use crate::procedure::ExternalProcedure;
+use crate::procedure::RegisterId;
 use crate::procedure::StackData;
 use crate::procedure::StackId;
+use crate::procedure::VirtualId;
 use crate::procedure::{Signature, StackSlotKind};
+use crate::r#type::Type;
 use crate::{
     instruction::{Instruction, Opcode, Operand, SourceOperands},
     module::Module,
-    procedure::{Block, Blocks, Parameter, Procedure, ProcedureData, Typ, Variable},
+    procedure::{Block, Blocks, Parameter, Procedure, ProcedureData, Variable},
 };
 
 pub struct ConverterAstToModule {
@@ -43,11 +48,14 @@ impl ConverterAstToModule {
     fn ast_module_to_module(&mut self, ast_module: &ast::Module) -> Result<Module, Error> {
         let mut external_procedures = Vec::new();
         for ast_exproc in &ast_module.external_procedures {
-            // let exproc = self.ast_exproc_to_exproc(ast_proc)?;
             let exproc = ExternalProcedure {
                 name: ast_exproc.name.text.to_string(),
-                parameters: ast_exproc.parameters.iter().map(|_| Typ).collect(),
-                returns: ast_exproc.returns.iter().map(|_| Typ).collect(),
+                parameters: ast_map(&ast_exproc.parameters, |ast_parameter| {
+                    Self::ast_type_to_type(&ast_parameter.typ)
+                })?,
+                returns: ast_map(&ast_exproc.returns, |ast_typ| {
+                    Self::ast_type_to_type(ast_typ)
+                })?,
                 calling_convention: CallingConventionId::PlatformDefault,
             };
             external_procedures.push(exproc);
@@ -106,6 +114,16 @@ impl ConverterAstToModule {
             Default::default()
         };
 
+        let maybe_ast_regalloc_block = ast_proc
+            .blocks
+            .iter()
+            .find(|block| block.name.text == "regalloc");
+        let register_allocations = if let Some(ast_regalloc_block) = maybe_ast_regalloc_block {
+            self.ast_regalloc_block_to_register_allocations(ast_regalloc_block)?
+        } else {
+            Default::default()
+        };
+
         let ast_entry_block = ast_proc
             .blocks
             .iter()
@@ -114,7 +132,7 @@ impl ConverterAstToModule {
         let ast_other_blocks = ast_proc
             .blocks
             .iter()
-            .filter(|block| !(block.name.text == "stack" || block.name.text == "entry"));
+            .filter(|block| !["stack", "regalloc", "entry"].contains(&block.name.text));
 
         if !ast_entry_block.parameters.is_empty() {
             self.add_error(Error::new(
@@ -123,7 +141,11 @@ impl ConverterAstToModule {
             ));
         }
 
-        let mut entry_block = self.ast_block_to_block(ast_entry_block)?;
+        let converted_entry_block = self.ast_block_to_block(ast_entry_block)?;
+
+        let mut virtual_types = converted_entry_block.virtual_types;
+        let mut entry_block = converted_entry_block.block;
+
         entry_block.parameters = ast_map(
             &ast_proc.signature.parameters,
             Self::ast_parameter_to_parameter,
@@ -131,47 +153,65 @@ impl ConverterAstToModule {
 
         let mut other_blocks = Vec::new();
         for ast_block in ast_other_blocks {
-            other_blocks.push(self.ast_block_to_block(ast_block)?);
+            let converted_block = self.ast_block_to_block(ast_block)?;
+            virtual_types.extend(converted_block.virtual_types);
+            other_blocks.push(converted_block.block);
         }
+
+        let procedure_data = ProcedureData {
+            stack_data,
+            highest_virtual_id: 1000, // FIXME actually get the highest id from the AST
+            virtual_types,
+            register_allocations,
+        };
 
         let proc = Procedure {
             signature: Signature {
                 name: ast_proc.signature.name.text.to_string(),
-                returns: ast_proc.signature.returns.iter().map(|_| Typ).collect(),
+                returns: ast_map(&ast_proc.signature.returns, |ast_typ| {
+                    Self::ast_type_to_type(ast_typ)
+                })?,
+
                 calling_convention: None,
             },
             blocks: Blocks {
                 entry: entry_block,
                 others: other_blocks,
             },
-            data: ProcedureData {
-                stack_data,
-                highest_virtual_id: 1000, // FIXME actually get the highest id from the AST
-            },
+            data: procedure_data,
         };
 
         Ok(proc)
     }
 
-    fn ast_block_to_block(&mut self, ast_block: &ast::Block) -> Result<Block, Error> {
+    fn ast_block_to_block(&mut self, ast_block: &ast::Block) -> Result<ConvertedBlock, Error> {
         let parameters = ast_map(&ast_block.parameters, Self::ast_parameter_to_parameter)?;
 
         let mut instructions = Vec::new();
+        let mut virtual_types = HashMap::new();
         for ast_instruction in &ast_block.instructions {
-            let instr = match Self::ast_instruction_to_instruction(ast_instruction) {
-                Ok(instr) => instr,
+            let (instr, typ) = match Self::ast_instruction_to_instruction(ast_instruction) {
+                Ok((instr, typ)) => (instr, typ),
                 Err(err) => {
                     self.add_error(err);
-                    Instruction::invalid()
+                    (Instruction::invalid(), None)
                 }
             };
+            if let Some(typ) = typ {
+                let virt_id = instr.dst.unwrap().as_virtual().unwrap();
+                virtual_types.insert(virt_id, typ);
+            }
             instructions.push(instr);
         }
 
-        Ok(Block {
+        let block = Block {
             name: ast_block.name.text.to_string(),
             parameters,
             instructions,
+        };
+        Ok(ConvertedBlock {
+            block,
+            virtual_types,
         })
     }
 
@@ -198,14 +238,15 @@ impl ConverterAstToModule {
                     id,
                     call_idx,
                     ordinal,
+                    typ,
                 } => {
                     let actual_id = stack_data.allocate_call_stack_var(call_idx, ordinal);
                     assert_eq!(actual_id, id);
                 }
-                StackDataItem::SlotVar { id, kind } => {
+                StackDataItem::SlotVar { id, kind, typ } => {
                     let actual_id = match &kind {
-                        StackSlotKind::Local => stack_data.allocate_local_stack_slot(),
-                        StackSlotKind::Caller => stack_data.allocate_caller_stack_slot(),
+                        StackSlotKind::Local => stack_data.allocate_local_stack_slot(typ),
+                        StackSlotKind::Caller => stack_data.allocate_caller_stack_slot(typ),
                     };
                     assert_eq!(actual_id, id);
                 }
@@ -218,12 +259,15 @@ impl ConverterAstToModule {
     fn ast_instruction_to_stack_data_item(
         ast_instr: &ast::Instruction,
     ) -> Result<StackDataItem, Error> {
-        let stack_var_id = if let Some(var_name) = &ast_instr.destination {
-            let stack_var = Self::ast_variable_to_variable(&var_name)?;
+        let (maybe_stack_var_id, maybe_typ) = if let Some(ast_dest) = &ast_instr.destination {
+            let stack_var = Self::ast_variable_to_variable(&ast_dest.name)?;
             let id = stack_var.as_stack().unwrap();
-            Some(id)
+
+            let maybe_typ = ast_map_option(&ast_dest.typ, Self::ast_type_to_type)?;
+
+            (Some(id), maybe_typ)
         } else {
-            None
+            (None, None)
         };
 
         match ast_instr.opcode.text {
@@ -233,18 +277,23 @@ impl ConverterAstToModule {
                     "caller" => StackSlotKind::Caller,
                     _ => unreachable!(),
                 };
-                let id = stack_var_id.unwrap();
-                Ok(StackDataItem::SlotVar { id, kind })
+                let id = maybe_stack_var_id.unwrap();
+                Ok(StackDataItem::SlotVar {
+                    id,
+                    kind,
+                    typ: maybe_typ.unwrap(),
+                })
             }
             "call" => {
                 dbg!(&ast_instr.operands);
                 let call_idx = ast_instr.operands[0].text.parse::<u32>().unwrap();
                 let ordinal = ast_instr.operands[1].text.parse::<u32>().unwrap();
-                if let Some(id) = stack_var_id {
+                if let Some(id) = maybe_stack_var_id {
                     Ok(StackDataItem::CallVar {
                         id,
                         call_idx,
                         ordinal,
+                        typ: maybe_typ.unwrap(),
                     })
                 } else {
                     Ok(StackDataItem::Call {
@@ -262,6 +311,39 @@ impl ConverterAstToModule {
         }
     }
 
+    fn ast_regalloc_block_to_register_allocations(
+        &self,
+        ast_block: &ast::Block,
+    ) -> Result<HashMap<VirtualId, RegisterId>, Error> {
+        let mut register_allocations = HashMap::new();
+        for ast_instr in &ast_block.instructions {
+            let (virt, reg) = self.ast_instruction_to_register_allocation(ast_instr)?;
+            register_allocations.insert(virt, reg);
+        }
+        Ok(register_allocations)
+    }
+
+    fn ast_instruction_to_register_allocation(
+        &self,
+        ast_instr: &ast::Instruction,
+    ) -> Result<(VirtualId, RegisterId), Error> {
+        let dst = ast_instr
+            .destination
+            .as_ref()
+            .ok_or_else(|| Error::new("missing virtual var", &ast_instr.opcode))?;
+        let dst_var = Self::ast_variable_to_variable(&dst.name)?;
+        let virt_id = dst_var
+            .as_virtual()
+            .ok_or_else(|| Error::new("must be virtual var", &dst.name))?;
+
+        let var = Self::ast_variable_to_variable(&ast_instr.opcode)?;
+        let reg_id = var
+            .as_register()
+            .ok_or_else(|| Error::new("must be register", &ast_instr.opcode))?;
+
+        Ok((virt_id, reg_id))
+    }
+
     fn ast_parameter_to_parameter(ast_parameter: &ast::Parameter) -> Result<Parameter, Error> {
         let parameter_name = ast_parameter
             .name
@@ -269,13 +351,24 @@ impl ConverterAstToModule {
             .ok_or_else(|| Error::new("missing parameter name".to_string(), &ast_parameter.typ))?;
         Ok(Parameter {
             variable: Self::ast_variable_to_variable(parameter_name)?,
-            typ: Typ,
+            typ: Self::ast_type_to_type(&ast_parameter.typ)?,
         })
+    }
+
+    fn ast_type_to_type(ast_typ: &ast::Span) -> Result<Type, Error> {
+        if let Some(typ) = Type::from_str(ast_typ.text) {
+            Ok(typ)
+        } else {
+            Err(Error::new(
+                format!("unknown type: {}", ast_typ.text),
+                ast_typ,
+            ))
+        }
     }
 
     fn ast_instruction_to_instruction(
         ast_instruction: &ast::Instruction,
-    ) -> Result<Instruction, Error> {
+    ) -> Result<(Instruction, Option<Type>), Error> {
         let opcode = Self::ast_opcode_to_opcode(&ast_instruction.opcode)?;
         let (src, target) = if let Some(ast_target) = &ast_instruction.target {
             let src = SourceOperands {
@@ -295,16 +388,25 @@ impl ConverterAstToModule {
             };
             (src, None)
         };
-        let dst = ast_map_option(&ast_instruction.destination, Self::ast_variable_to_variable)?;
+        let (dst, dst_type) = if let Some(ast_dest) = &ast_instruction.destination {
+            let dst = Some(Self::ast_variable_to_variable(&ast_dest.name)?);
+            let dst_type = ast_map_option(&ast_dest.typ, Self::ast_type_to_type)?;
+            (dst, dst_type)
+        } else {
+            (None, None)
+        };
         let cond = ast_map_option(&ast_instruction.condition, Self::ast_condition_to_condition)?;
 
-        Ok(Instruction {
-            opcode,
-            src,
-            dst,
-            target,
-            cond,
-        })
+        Ok((
+            Instruction {
+                opcode,
+                src,
+                dst,
+                target,
+                cond,
+            },
+            dst_type,
+        ))
     }
 
     fn ast_condition_to_condition(ast_condition: &ast::Condition) -> Result<Condition, Error> {
@@ -425,18 +527,29 @@ fn quoted_to_bytes(quoted: &str) -> Vec<u8> {
     bytes
 }
 
+struct ConvertedBlock {
+    block: Block,
+    virtual_types: HashMap<VirtualId, Type>,
+}
+
+// TODO rename this stuff
 enum StackDataItem {
+    // Sum of space used by associated parameters for a proc call
     Call {
         idx: u32,
         size: u32,
     },
+    // Call parameter var
     CallVar {
         id: StackId,
         call_idx: u32,
         ordinal: u32,
+        typ: Type,
     },
+    // Local var
     SlotVar {
         id: StackId,
         kind: StackSlotKind,
+        typ: Type,
     },
 }

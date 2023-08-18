@@ -97,7 +97,7 @@ impl<'a> Parser<'a> {
         let name = self
             .expect_any_alphanumeric(ExpectedKind::Identifier)?
             .span();
-        let typ = self.parse_typ_annotation()?;
+        let typ = self.parse_type_annotation()?;
         self.expect_keyword("=")?;
         let value = self.expect_token()?.span();
         self.expect_separator(";")?;
@@ -135,7 +135,7 @@ impl<'a> Parser<'a> {
             .expect_any_alphanumeric(ExpectedKind::RegisterName)?
             .span();
         let maybe_second = if self.predict_keyword(":")? {
-            Some(self.parse_typ_annotation()?)
+            Some(self.parse_type_annotation()?)
         } else {
             None
         };
@@ -149,7 +149,7 @@ impl<'a> Parser<'a> {
         Ok(Parameter { name, typ })
     }
 
-    fn parse_typ_annotation(&mut self) -> Result<Span<'a>, Error<'a>> {
+    fn parse_type_annotation(&mut self) -> Result<Span<'a>, Error<'a>> {
         match self.expect_keyword(":") {
             Ok(_) => (),
             Err(err) if err.is_recoverable() => {
@@ -199,10 +199,23 @@ impl<'a> Parser<'a> {
         let mut destination = None;
         let opcode;
 
-        if second.text == "=" {
+        if second.text == "=" || second.text == ":" {
             // Instruction is an assignment
-            destination = Some(first.span());
-            self.expect_token()?; // Skip second token which is "="
+            let typ = if second.text == ":" {
+                // assignment with type annotation
+                let typ = self.parse_type_annotation()?;
+                self.expect_keyword("=")?;
+                Some(typ)
+            } else {
+                // assignment without type annotation
+                self.expect_token()?; // Skip second token which is "="
+                None
+            };
+            destination = Some(Destination {
+                name: first.span(),
+                typ,
+            });
+
             opcode = self.expect_any_alphanumeric(ExpectedKind::Opcode)?.span();
         } else {
             // Instruction is not an assignment

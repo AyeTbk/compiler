@@ -119,7 +119,7 @@ fn generate_instruction_assembly(
     buf: &mut String,
 ) {
     match instr.opcode {
-        Opcode::Load | Opcode::Store | Opcode::Move => {
+        Opcode::Load | Opcode::Store | Opcode::Move | Opcode::Convert => {
             generate_mov(module, proc, instr, context, buf)
         }
         Opcode::Add | Opcode::Sub => generate_binary_instruction(module, proc, instr, context, buf),
@@ -250,7 +250,11 @@ fn generate_operand_assembly(
 ) {
     match operand {
         Operand::Imm(imm) => buf.push_str(&format!("${}", imm)),
-        Operand::Var(Variable::Register(register_id)) => {
+        Operand::Var(Variable::Virtual(virt_id)) => {
+            let register_id = proc
+                .data
+                .register_allocation(virt_id)
+                .expect("variable not allocated");
             buf.push_str("%");
             buf.push_str(context.isa.register_name(register_id));
         }

@@ -38,7 +38,8 @@ define_opcodes! {
     Store, // Store to a memory location.
     Load, // Load from a memory location.
     Address, // Get the address of a stack or data variable. Using it on a virtual will force it to be spilled.
-    Move, // Move an operand value to a variable. Used for register allocation.
+    Move, // Move an operand value to a variable.
+    Convert, // Convert to another type. ex: u64 to u32, i64 to u64, f64 to u64, etc.
     Call, // Call a procedure.
     Ret, // Return from a procedure.
     Jump, // Jump to a block of the same procedure. Can have a condition.

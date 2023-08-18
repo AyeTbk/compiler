@@ -6,7 +6,7 @@ use std::{
 use crate::{
     context::Context,
     instruction::{Instruction, Opcode, Operand},
-    procedure::{Procedure, RegisterId, StackId, Variable, VirtualId},
+    procedure::{Procedure, ProcedureData, RegisterId, StackId, Variable, VirtualId},
     regalloc::InstructionConstraint,
     utils::Peephole,
 };
@@ -142,17 +142,18 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
     let mut allocated_stack_vars: HashMap<VirtualId, StackId> = Default::default();
     for (&virt_id, alloc) in &allocs.allocations {
         if matches!(alloc, Allocation::Spilled) {
-            let stack_id = proc.data.stack_data.allocate_local_stack_slot();
+            let typ = proc.data.virtual_variable_type(virt_id).unwrap();
+            let stack_id = proc.data.stack_data.allocate_local_stack_slot(typ);
             allocated_stack_vars.insert(virt_id, stack_id);
         }
     }
 
-    let do_alloc = |variable: &mut Variable| {
+    let do_alloc = |proc_data: &mut ProcedureData, variable: &mut Variable| {
         let Some(var) = variable.as_virtual() else { return };
         let alloc = allocs.allocations.get(&var).unwrap();
         match alloc {
             Allocation::Register(reg) => {
-                *variable = Variable::Register(*reg);
+                proc_data.set_register_allocation(var, *reg);
             }
             Allocation::Spilled => {
                 let stack_id = allocated_stack_vars.get(&var).unwrap();
@@ -161,24 +162,24 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
         }
     };
 
-    Peephole::peep_blocks(proc, |_, _, block| {
+    Peephole::peep_blocks(proc, |ph, _, block| {
         for param in &mut block.parameters {
-            do_alloc(&mut param.variable);
+            do_alloc(ph.proc_data, &mut param.variable);
         }
 
         for instr in block.instructions.iter_mut() {
             for operand in instr.operands_mut() {
                 if let Some(variable) = operand.as_variable_mut() {
-                    do_alloc(variable);
+                    do_alloc(ph.proc_data, variable);
                 }
             }
             for cond_operand in instr.condition_operands_mut() {
                 if let Some(variable) = cond_operand.as_variable_mut() {
-                    do_alloc(variable);
+                    do_alloc(ph.proc_data, variable);
                 }
             }
             if let Some(dst) = &mut instr.dst {
-                do_alloc(dst);
+                do_alloc(ph.proc_data, dst);
             }
         }
     });

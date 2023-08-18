@@ -9,7 +9,13 @@ use compiler::{
 };
 
 fn main() -> ExitCode {
-    let source_name = "data/example.ayir";
+    let args = cli::Arguments::from_args();
+
+    let source_name = args
+        .input
+        .as_ref()
+        .map(String::as_str)
+        .unwrap_or("data/example.ayir");
     let source = std::fs::read_to_string(source_name).unwrap();
 
     let mut errors = Vec::new();
@@ -27,7 +33,7 @@ fn main() -> ExitCode {
     }
 
     if errors.is_empty() {
-        handle_module(convert_result.module);
+        handle_module(args, convert_result.module);
 
         ExitCode::SUCCESS
     } else {
@@ -39,8 +45,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn handle_module(mut module: Module) {
+fn handle_module(args: cli::Arguments, mut module: Module) {
     let mut context = Context::new(x86_64::make_isa());
+
     for proc in module.procedures.iter_mut() {
         proc.signature.calling_convention = Some(CallingConventionId::SysV);
         context.declarations.declare_procedure(&proc);
@@ -54,11 +61,36 @@ fn handle_module(mut module: Module) {
         x86_64::regalloc::allocate_registers(proc, &context);
     }
 
-    if std::env::args().any(|a| a == "--asm") {
+    if args.asm {
         let s = x86_64::assembly::generate_assembly(&module, &context);
         println!("{}", s);
     } else {
         let s = serialize::convert::convert_module_to_string(&module);
         println!("{}", s);
+    }
+}
+
+mod cli {
+    #[derive(Debug)]
+    pub struct Arguments {
+        pub input: Option<String>,
+        pub asm: bool,
+    }
+
+    impl Arguments {
+        pub fn from_args() -> Self {
+            let mut input = None;
+            let mut asm = false;
+
+            let args = std::env::args().skip(1);
+            for arg in args {
+                match arg.as_str() {
+                    "--asm" => asm = true,
+                    _ => input = Some(arg),
+                }
+            }
+
+            Self { input, asm }
+        }
     }
 }
