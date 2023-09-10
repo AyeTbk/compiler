@@ -5,7 +5,8 @@ use compiler::{
     context::Context,
     error_reporting::{make_error_report, report_error},
     module::Module,
-    serialize, x86_64,
+    serialize,
+    x86_64::{self, mir::make_mir},
 };
 
 fn main() -> ExitCode {
@@ -62,7 +63,8 @@ fn handle_module(args: cli::Arguments, mut module: Module) {
     }
 
     if args.asm {
-        let s = x86_64::assembly::generate_assembly(&module, &context);
+        let mir = make_mir(&module, &context);
+        let s = x86_64::assembly::generate_assembly(&module, &mir, &context);
         println!("{}", s);
     } else {
         let s = serialize::convert::convert_module_to_string(&module);

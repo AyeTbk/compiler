@@ -11,11 +11,12 @@ pub type RegisterId = u32;
 pub type StackId = u32;
 pub type DataId = u32;
 
+// TODO maybe put in procedure data?
 #[derive(Debug, Clone)]
 pub struct Signature {
     pub name: String,
     // pub parameters: Vec<Parameter>, // Find it in proc.blocks
-    pub returns: Vec<Type>,
+    // pub returns: Vec<Type>,
     pub calling_convention: Option<CallingConventionId>,
 }
 
@@ -39,6 +40,7 @@ pub struct ProcedureData {
     pub stack_data: StackData,
     pub highest_virtual_id: VirtualId,
     pub virtual_types: HashMap<VirtualId, Type>,
+    pub return_type: Option<Type>,
     pub register_allocations: HashMap<VirtualId, RegisterId>,
 }
 
@@ -59,8 +61,17 @@ impl ProcedureData {
         self.register_allocations.insert(virt_id, reg_id);
     }
 
-    pub fn acquire_new_virtual_variable(&mut self) -> Variable {
-        Variable::Virtual(self.acquire_next_virtual_id())
+    pub fn acquire_new_virtual_variable(&mut self, typ: Type) -> Variable {
+        todo!("this");
+        // TODO Move all types of a procedure in ProcedureData, including those of the
+        // signature. Then this method will be ezpz to implement.
+
+        // TODO Add a utility method on Peephole or something like that to simplify
+        // inserting inflexion points (redundant movs) that take care of
+        // propagating types.
+
+        let virt_id = self.acquire_next_virtual_id();
+        Variable::Virtual(virt_id)
     }
 
     fn acquire_next_virtual_id(&mut self) -> VirtualId {

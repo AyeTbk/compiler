@@ -9,7 +9,6 @@ use crate::{
 
 pub struct Isa {
     pub register_ids: Vec<RegisterId>,
-    pub register_names: Vec<&'static str>,
     pub instr_constraints: HashMap<Opcode, InstructionConstraint>,
     pub callconvs: HashMap<CallingConventionId, CallingConvention>,
 }
@@ -17,10 +16,6 @@ pub struct Isa {
 impl Isa {
     pub fn register_ids(&self) -> &[RegisterId] {
         &self.register_ids
-    }
-
-    pub fn register_name(&self, register_id: RegisterId) -> &str {
-        self.register_names[register_id as usize]
     }
 
     pub fn instruction_constraint(&self, opcode: Opcode) -> Option<InstructionConstraint> {
