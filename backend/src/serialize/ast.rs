@@ -22,7 +22,7 @@ pub struct Procedure<'a> {
 pub struct ProcedureSignature<'a> {
     pub name: Span<'a>,
     pub parameters: Vec<Parameter<'a>>,
-    pub returns: Vec<Span<'a>>,
+    pub return_type: Option<Span<'a>>,
 }
 
 #[derive(Debug)]

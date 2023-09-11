@@ -7,6 +7,7 @@ use crate::{
     context::Context,
     instruction::{Instruction, Opcode, Operand},
     procedure::{Procedure, ProcedureData, RegisterId, StackId, Variable, VirtualId},
+    r#type::{IntegerType, Type},
     regalloc::InstructionConstraint,
     utils::Peephole,
 };
@@ -63,7 +64,7 @@ fn pin_live_intervals_callconv(
     for (i, param) in proc.blocks.entry_parameters().enumerate() {
         // FIXME handle need for spill.
         let reg = proc_callconv.integer_parameter_registers[i];
-        let var = param.variable.as_virtual().unwrap();
+        let var = param.as_virtual().unwrap();
         intervals.set_variable_pinned_allocation(var, Allocation::Register(reg));
     }
 
@@ -111,7 +112,7 @@ fn pin_live_intervals_block_parameters(
             let mut regs = callconv.scratch_registers.clone();
             let mut allocated_regs = Vec::new();
             for param in &block.parameters {
-                let var = param.variable.as_virtual().unwrap();
+                let var = param.as_virtual().unwrap();
                 let reg = regs
                     .pop()
                     .expect("if this panics, improve this allocation scheme, tyvm");
@@ -164,7 +165,7 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
 
     Peephole::peep_blocks(proc, |ph, _, block| {
         for param in &mut block.parameters {
-            do_alloc(ph.proc_data, &mut param.variable);
+            do_alloc(ph.proc_data, param);
         }
 
         for instr in block.instructions.iter_mut() {
@@ -398,14 +399,20 @@ fn minimize_block_arguments_live_intervals(proc: &mut Procedure) {
         }
 
         for operand in instr.operands_mut() {
-            let new_var = ph.proc_data.acquire_new_virtual_variable();
+            let operand_virt_id = operand.as_variable().unwrap().as_virtual().unwrap();
+            let new_var = ph
+                .proc_data
+                .acquire_new_virtual_variable_for(operand_virt_id);
             ph.insert_before(i, Instruction::mov(new_var, *operand));
             *operand = Operand::Var(new_var);
         }
 
         for cond_operand in instr.condition_operands_mut() {
             if cond_operand.as_variable().is_some() {
-                let new_var = ph.proc_data.acquire_new_virtual_variable();
+                let operand_virt_id = cond_operand.as_variable().unwrap().as_virtual().unwrap();
+                let new_var = ph
+                    .proc_data
+                    .acquire_new_virtual_variable_for(operand_virt_id);
                 ph.insert_before(i, Instruction::mov(new_var, *cond_operand));
                 *cond_operand = Operand::Var(new_var);
             }
@@ -427,7 +434,10 @@ fn minimize_shared_src_dst_live_intervals(proc: &mut Procedure, context: &Contex
         }
 
         let first_operand = instr.operands_mut().next().unwrap();
-        let new_var = ph.proc_data.acquire_new_virtual_variable();
+        let operand_virt_id = first_operand.as_variable().unwrap().as_virtual().unwrap();
+        let new_var = ph
+            .proc_data
+            .acquire_new_virtual_variable_for(operand_virt_id);
         ph.insert_before(i, Instruction::mov(new_var, *first_operand));
         *first_operand = new_var.into();
     });
@@ -456,9 +466,10 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure, context: &Context) {
         if block_i == 0 {
             for (i, param) in block.parameters.iter_mut().enumerate() {
                 if i < callconv.integer_parameter_registers.len() {
-                    let new_var = ph.proc_data.acquire_new_virtual_variable();
-                    new_var_map.insert(param.variable, new_var);
-                    ph.insert_before(0, Instruction::mov(new_var, param.variable));
+                    let param_virt_id = param.as_virtual().unwrap();
+                    let new_var = ph.proc_data.acquire_new_virtual_variable_for(param_virt_id);
+                    new_var_map.insert(*param, new_var);
+                    ph.insert_before(0, Instruction::mov(new_var, *param));
                 } else {
                     unimplemented!("stack?");
                     // answer: probably not, I think you should ignore callconv here, and
@@ -494,7 +505,10 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure, context: &Context) {
                     HashSet::from_iter(instr.operands().copied());
                 for operand in unique_operands {
                     let Some(&operand_var) = operand.as_variable() else { continue };
-                    let new_var = ph.proc_data.acquire_new_virtual_variable();
+                    let operand_virt_id = operand_var.as_virtual().unwrap();
+                    let new_var = ph
+                        .proc_data
+                        .acquire_new_virtual_variable_for(operand_virt_id);
                     new_var_map.insert(operand_var, new_var);
                 }
 
@@ -505,7 +519,9 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure, context: &Context) {
                             new_var
                         }
                         Operand::Imm(_) => {
-                            let new_var = ph.proc_data.acquire_new_virtual_variable();
+                            let new_var = ph
+                                .proc_data
+                                .acquire_new_virtual_variable(Type::Integer(IntegerType::U64));
                             new_var
                         }
                     };
@@ -513,7 +529,8 @@ fn minimize_pinned_live_intervals(proc: &mut Procedure, context: &Context) {
                     *operand = new_var.into();
                 }
                 for &dst_var in &instr.dst {
-                    let new_var = ph.proc_data.acquire_new_virtual_variable();
+                    let dst_virt_id = dst_var.as_virtual().unwrap();
+                    let new_var = ph.proc_data.acquire_new_virtual_variable_for(dst_virt_id);
                     new_var_map.insert(dst_var, new_var);
                     ph.insert_after(i, Instruction::mov(new_var, dst_var));
                 }
@@ -532,7 +549,7 @@ fn compute_live_intervals(proc: &Procedure, context: &Context) -> LiveIntervals 
     for block in proc.blocks.iter() {
         // Track virtual block parameters
         for param in &block.parameters {
-            let Some(virt_var_id) = param.variable.as_virtual() else { continue };
+            let Some(virt_var_id) = param.as_virtual() else { continue };
             intervals.track_variable(virt_var_id, Position::Pre(instr_idx));
         }
 

@@ -24,7 +24,7 @@ pub struct Signature {
 pub struct ExternalProcedure {
     pub name: String,
     pub parameters: Vec<Type>,
-    pub returns: Vec<Type>,
+    pub return_type: Option<Type>,
     pub calling_convention: CallingConventionId,
 }
 
@@ -62,16 +62,20 @@ impl ProcedureData {
     }
 
     pub fn acquire_new_virtual_variable(&mut self, typ: Type) -> Variable {
-        todo!("this");
-        // TODO Move all types of a procedure in ProcedureData, including those of the
-        // signature. Then this method will be ezpz to implement.
-
         // TODO Add a utility method on Peephole or something like that to simplify
         // inserting inflexion points (redundant movs) that take care of
         // propagating types.
 
         let virt_id = self.acquire_next_virtual_id();
+        self.virtual_types.insert(virt_id, typ);
         Variable::Virtual(virt_id)
+    }
+
+    pub fn acquire_new_virtual_variable_for(&mut self, other: VirtualId) -> Variable {
+        let typ = self
+            .virtual_variable_type(other)
+            .expect("other should have a type");
+        self.acquire_new_virtual_variable(typ)
     }
 
     fn acquire_next_virtual_id(&mut self) -> VirtualId {
@@ -252,11 +256,11 @@ impl Blocks {
             .chain(self.others.iter_mut())
     }
 
-    pub fn entry_parameters(&self) -> impl Iterator<Item = &Parameter> {
+    pub fn entry_parameters(&self) -> impl Iterator<Item = &Variable> {
         self.entry.parameters.iter()
     }
 
-    pub fn entry_parameters_mut(&mut self) -> impl Iterator<Item = &mut Parameter> {
+    pub fn entry_parameters_mut(&mut self) -> impl Iterator<Item = &mut Variable> {
         self.entry.parameters.iter_mut()
     }
 }
@@ -264,14 +268,8 @@ impl Blocks {
 #[derive(Debug)]
 pub struct Block {
     pub name: String,
-    pub parameters: Vec<Parameter>,
+    pub parameters: Vec<Variable>,
     pub instructions: Vec<Instruction>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Parameter {
-    pub variable: Variable,
-    pub typ: Type,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

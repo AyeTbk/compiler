@@ -31,18 +31,17 @@ impl Declarations {
             .entry_parameters()
             .map(|_param| ProcedureParameter { typ: () })
             .collect();
-        let returns = procedure
-            .signature
-            .returns
-            .iter()
-            .map(|_ret| ProcedureReturn { typ: () })
-            .collect();
+        let return_type = procedure
+            .data
+            .return_type
+            .as_ref()
+            .map(|_ret| ProcedureReturn { typ: () });
 
         let procdecl = ProcedureDeclaration {
             external: false,
             name,
             parameters,
-            returns,
+            return_type,
             calling_convention: procedure.signature.calling_convention,
         };
 
@@ -56,17 +55,16 @@ impl Declarations {
             .iter()
             .map(|_param| ProcedureParameter { typ: () })
             .collect();
-        let returns = procedure
-            .returns
-            .iter()
-            .map(|_ret| ProcedureReturn { typ: () })
-            .collect();
+        let return_type = procedure
+            .return_type
+            .as_ref()
+            .map(|_ret| ProcedureReturn { typ: () });
 
         let procdecl = ProcedureDeclaration {
             external: false,
             name,
             parameters,
-            returns,
+            return_type,
             calling_convention: Some(procedure.calling_convention),
         };
 
@@ -79,7 +77,7 @@ pub struct ProcedureDeclaration {
     pub external: bool,
     pub name: Symbol,
     pub parameters: Vec<ProcedureParameter>,
-    pub returns: Vec<ProcedureReturn>,
+    pub return_type: Option<ProcedureReturn>,
     pub calling_convention: Option<CallingConventionId>,
 }
 

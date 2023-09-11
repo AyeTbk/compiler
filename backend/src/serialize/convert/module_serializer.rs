@@ -8,8 +8,8 @@ use crate::{
     instruction::{Condition, Instruction, Operand, Target},
     module::Module,
     procedure::{
-        Block, DataId, ExternalProcedure, Parameter, Procedure, RegisterId, StackData,
-        StackSlotKind, StackVar, Variable, VirtualId,
+        Block, DataId, ExternalProcedure, Procedure, RegisterId, StackData, StackSlotKind,
+        StackVar, Variable, VirtualId,
     },
     r#type::Type,
 };
@@ -79,10 +79,9 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
 
     fn serialize_proc(&mut self, proc: &Procedure) -> Result {
         self.write_fmt(format_args!("proc {}", proc.signature.name))?;
-        self.serialize_parameter_list(&proc.blocks.entry.parameters)?;
-        if !proc.signature.returns.is_empty() {
+        self.serialize_parameter_list(proc, &proc.blocks.entry.parameters)?;
+        if let Some(return_typ) = proc.data.return_type.as_ref() {
             self.write_str(" -> ")?;
-            let return_typ = proc.signature.returns.first().unwrap();
             self.serialize_typ(return_typ)?;
         }
         self.write_str(" ")?;
@@ -112,9 +111,8 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         }
         self.write_str(")")?;
 
-        if !proc.returns.is_empty() {
+        if let Some(return_typ) = proc.return_type.as_ref() {
             self.write_str(" -> ")?;
-            let return_typ = proc.returns.first().unwrap();
             self.serialize_typ(return_typ)?;
         }
         self.write_str(";")?;
@@ -183,7 +181,7 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
     fn serialize_block(&mut self, proc: &Procedure, block: &Block, is_entry: bool) -> Result {
         self.write_fmt(format_args!("{}", block.name))?;
         if !is_entry {
-            self.serialize_parameter_list(&block.parameters)?;
+            self.serialize_parameter_list(proc, &block.parameters)?;
         }
         self.write_str(" ")?;
         self.block(|this| {
@@ -195,14 +193,17 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         })
     }
 
-    fn serialize_parameter_list(&mut self, parameters: &[Parameter]) -> Result {
+    fn serialize_parameter_list(&mut self, proc: &Procedure, parameters: &[Variable]) -> Result {
         self.write_str("(")?;
         for (i, parameter) in parameters.iter().enumerate() {
             if i != 0 {
                 self.write_str(", ")?;
             }
-            self.serialize_variable(&parameter.variable)?;
-            self.serialize_type_annotation(&parameter.typ)?;
+            self.serialize_variable(&parameter)?;
+            let typ = proc
+                .data
+                .virtual_variable_type(parameter.as_virtual().unwrap());
+            self.serialize_type_annotation(typ.as_ref().unwrap())?;
         }
         self.write_str(")")
     }

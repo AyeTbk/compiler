@@ -175,6 +175,9 @@ impl<'a> ProcAssemblyGen<'a> {
 
     pub fn generate_mov(&self, _instr: &Instruction, mir: &MirInstruction, buf: &mut String) {
         buf.push_str("    mov");
+        if mir.operands.sizes_two().is_none() {
+            dbg!(mir);
+        }
         let (dst_size, src_size) = mir.operands.sizes_two().unwrap();
         if dst_size <= src_size {
             match dst_size {

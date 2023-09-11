@@ -18,7 +18,7 @@ use crate::r#type::Type;
 use crate::{
     instruction::{Instruction, Opcode, Operand, SourceOperands},
     module::Module,
-    procedure::{Block, Blocks, Parameter, Procedure, ProcedureData, Variable},
+    procedure::{Block, Blocks, Procedure, ProcedureData, Variable},
 };
 
 pub struct ConverterAstToModule {
@@ -53,7 +53,7 @@ impl ConverterAstToModule {
                 parameters: ast_map(&ast_exproc.parameters, |ast_parameter| {
                     Self::ast_type_to_type(&ast_parameter.typ)
                 })?,
-                returns: ast_map(&ast_exproc.returns, |ast_typ| {
+                return_type: ast_map_option(&ast_exproc.return_type, |ast_typ| {
                     Self::ast_type_to_type(ast_typ)
                 })?,
                 calling_convention: CallingConventionId::PlatformDefault,
@@ -146,10 +146,12 @@ impl ConverterAstToModule {
         let mut virtual_types = converted_entry_block.virtual_types;
         let mut entry_block = converted_entry_block.block;
 
-        entry_block.parameters = ast_map(
-            &ast_proc.signature.parameters,
-            Self::ast_parameter_to_parameter,
-        )?;
+        for ast_parameter in &ast_proc.signature.parameters {
+            let parameter = Self::ast_parameter_to_parameter(ast_parameter)?;
+            let variable = parameter.0;
+            entry_block.parameters.push(variable);
+            virtual_types.insert(variable.as_virtual().unwrap(), parameter.1);
+        }
 
         let mut other_blocks = Vec::new();
         for ast_block in ast_other_blocks {
@@ -162,15 +164,15 @@ impl ConverterAstToModule {
             stack_data,
             highest_virtual_id: 1000, // FIXME actually get the highest id from the AST
             virtual_types,
+            return_type: ast_map_option(&ast_proc.signature.return_type, |ast_typ| {
+                Self::ast_type_to_type(ast_typ)
+            })?,
             register_allocations,
         };
 
         let proc = Procedure {
             signature: Signature {
                 name: ast_proc.signature.name.text.to_string(),
-                returns: ast_map(&ast_proc.signature.returns, |ast_typ| {
-                    Self::ast_type_to_type(ast_typ)
-                })?,
 
                 calling_convention: None,
             },
@@ -185,10 +187,17 @@ impl ConverterAstToModule {
     }
 
     fn ast_block_to_block(&mut self, ast_block: &ast::Block) -> Result<ConvertedBlock, Error> {
-        let parameters = ast_map(&ast_block.parameters, Self::ast_parameter_to_parameter)?;
+        let mut virtual_types = HashMap::new();
+
+        let mut parameters = Vec::new();
+        for ast_parameter in &ast_block.parameters {
+            let parameter = Self::ast_parameter_to_parameter(ast_parameter)?;
+            let variable = parameter.0;
+            parameters.push(variable);
+            virtual_types.insert(variable.as_virtual().unwrap(), parameter.1);
+        }
 
         let mut instructions = Vec::new();
-        let mut virtual_types = HashMap::new();
         for ast_instruction in &ast_block.instructions {
             let (instr, typ) = match Self::ast_instruction_to_instruction(ast_instruction) {
                 Ok((instr, typ)) => (instr, typ),
@@ -344,15 +353,16 @@ impl ConverterAstToModule {
         Ok((virt_id, reg_id))
     }
 
-    fn ast_parameter_to_parameter(ast_parameter: &ast::Parameter) -> Result<Parameter, Error> {
+    fn ast_parameter_to_parameter(
+        ast_parameter: &ast::Parameter,
+    ) -> Result<(Variable, Type), Error> {
         let parameter_name = ast_parameter
             .name
             .as_ref()
             .ok_or_else(|| Error::new("missing parameter name".to_string(), &ast_parameter.typ))?;
-        Ok(Parameter {
-            variable: Self::ast_variable_to_variable(parameter_name)?,
-            typ: Self::ast_type_to_type(&ast_parameter.typ)?,
-        })
+        let variable = Self::ast_variable_to_variable(parameter_name)?;
+        let typ = Self::ast_type_to_type(&ast_parameter.typ)?;
+        Ok((variable, typ))
     }
 
     fn ast_type_to_type(ast_typ: &ast::Span) -> Result<Type, Error> {

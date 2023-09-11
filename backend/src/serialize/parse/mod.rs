@@ -112,17 +112,17 @@ impl<'a> Parser<'a> {
             .span();
         let parameters = self.parse_parameter_list()?;
 
-        let returns = if self.predict_keyword("->")? {
+        let return_type = if self.predict_keyword("->")? {
             self.read_token();
-            vec![self.expect_any_alphanumeric(ExpectedKind::TypeName)?.span()]
+            Some(self.expect_any_alphanumeric(ExpectedKind::TypeName)?.span())
         } else {
-            vec![]
+            None
         };
 
         Ok(ProcedureSignature {
             name,
             parameters,
-            returns,
+            return_type,
         })
     }
 

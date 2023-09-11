@@ -28,6 +28,7 @@ pub struct MirBlock {
     pub instrs: Vec<MirInstruction>,
 }
 
+#[derive(Debug)]
 pub struct MirInstruction {
     pub operands: Operands,
     pub condition: Option<Condition>,
@@ -53,6 +54,16 @@ pub fn make_mir(module: &Module, context: &Context) -> MirModule {
                             condition = Some(make_mir_condition(module, context, proc, ir_cond));
                         }
                         Operands::JumpTarget(jump_target)
+                    }
+                    Opcode::Move => {
+                        let op1 = instr.dst.map(|dst| {
+                            make_mir_operand(module, context, proc, &IrOperand::Var(dst))
+                        });
+                        let op2 = instr
+                            .operands()
+                            .next()
+                            .map(|op| make_mir_operand(module, context, proc, op));
+                        combine_mir_operands(op1, op2).expect("invalid condition operands")
                     }
                     _ => {
                         let mut o = instr.operands();
