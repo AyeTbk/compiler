@@ -1,9 +1,9 @@
 use crate::{
     context::Context,
     data::Value,
-    instruction::{Condition, Instruction, Opcode, Operand as IrOperand},
+    instruction::{Condition, Instruction, Opcode},
     module::Module,
-    procedure::{Block, DataId, Procedure, Variable},
+    procedure::{Block, DataId, Procedure},
 };
 
 use super::{
@@ -11,7 +11,7 @@ use super::{
         instruction::{Immediate, Memory, Operands, SizedMemory, SizedRegister},
         MirBlock, MirInstruction, MirModule, MirProcedure,
     },
-    Register, Size,
+    Size,
 };
 
 pub fn generate_assembly(module: &Module, mir_module: &MirModule, context: &Context) -> String {
@@ -137,7 +137,9 @@ impl<'a> ProcAssemblyGen<'a> {
         match instr.opcode {
             Opcode::Load | Opcode::Store | Opcode::Move => self.generate_mov(instr, mir, buf),
             Opcode::Convert => self.generate_convert(instr, mir, buf),
-            Opcode::Add | Opcode::Sub => self.generate_binary_instruction(instr, mir, buf),
+            Opcode::Add | Opcode::Sub => {
+                self.generate_binary_instruction(instr.opcode.to_str(), mir, buf)
+            }
             Opcode::Jump => self.generate_jump(instr, mir, buf),
             Opcode::Call => self.generate_call(instr, buf),
             Opcode::Ret => self.generate_ret(buf),
@@ -146,48 +148,61 @@ impl<'a> ProcAssemblyGen<'a> {
         }
     }
 
-    pub fn generate_convert(&self, instr: &Instruction, mir: &MirInstruction, buf: &mut String) {
-        unimplemented!()
+    pub fn generate_convert(&self, _instr: &Instruction, mir: &MirInstruction, buf: &mut String) {
+        let mut instr_string = String::from("mov");
+        let (dst_size, src_size) = mir.operands.sizes_two().unwrap();
+        let mut updated_operands = mir.operands.clone();
+        if dst_size != src_size {
+            match (dst_size, src_size) {
+                (Size::Qword, Size::Dword) if !mir.signed => {
+                    if mir.operands.are_same_two() {
+                        return;
+                    }
+                    instr_string.push_str("q");
+                    updated_operands.set_sizes_two(Size::Qword, Size::Qword);
+                }
+                (Size::Dword, Size::Qword) if !mir.signed => {
+                    if mir.operands.are_same_two() {
+                        return;
+                    }
+                    instr_string.push_str("l");
+                    updated_operands.set_sizes_two(Size::Dword, Size::Dword);
+                }
+                _ => {
+                    instr_string.push_str(if mir.signed { "s" } else { "z" });
+                    instr_string.push_str(opcode_size_suffix(src_size));
+                    instr_string.push_str(opcode_size_suffix(dst_size));
+                }
+            }
+        } else {
+            unimplemented!("support for plain moves comes from the 'move' IR instr.");
+        }
+        buf.push_str("    ");
+        buf.push_str(&instr_string);
+
+        self.generate_operands(&updated_operands, buf);
+        buf.push_str("\n");
     }
 
     pub fn generate_address_instruction(
         &self,
-        instr: &Instruction,
+        _instr: &Instruction,
         mir: &MirInstruction,
         buf: &mut String,
     ) {
-        buf.push_str("    leaq ");
-
-        let src = *instr.operands().next().unwrap();
-        match src {
-            IrOperand::Var(Variable::Data(data_id)) => {
-                buf.push_str(&make_data_label(data_id));
-            }
-            _ => unimplemented!(),
-        }
-        buf.push_str(", ");
-
-        let dst = instr.dst.unwrap();
-        self.generate_operand_assembly(IrOperand::Var(dst), buf);
-
+        buf.push_str("    lea");
+        buf.push_str(opcode_size_suffix(mir.operands.size()));
+        self.generate_operands(&mir.operands, buf);
         buf.push_str("\n");
     }
 
     pub fn generate_mov(&self, _instr: &Instruction, mir: &MirInstruction, buf: &mut String) {
         buf.push_str("    mov");
-        if mir.operands.sizes_two().is_none() {
-            dbg!(mir);
-        }
         let (dst_size, src_size) = mir.operands.sizes_two().unwrap();
         if dst_size <= src_size {
-            match dst_size {
-                Size::Qword => buf.push_str("q"),
-                Size::Dword => buf.push_str("l"),
-                Size::Word => (),
-                Size::Byte => buf.push_str("b"),
-            }
+            buf.push_str(opcode_size_suffix(dst_size));
         } else {
-            todo!("support sign/zero extend.");
+            unimplemented!("support for sign/zero extend comes from the 'convert' IR instr.");
         }
         self.generate_operands(&mir.operands, buf);
         buf.push_str("\n");
@@ -207,35 +222,27 @@ impl<'a> ProcAssemblyGen<'a> {
 
     pub fn generate_binary_instruction(
         &self,
-        instr: &Instruction,
+        opcode_str: &str,
         mir: &MirInstruction,
         buf: &mut String,
     ) {
-        buf.push_str(&format!("    {}q ", instr.opcode.to_str()));
-
-        let mut operands = instr.operands().collect::<Vec<_>>();
-        operands.reverse();
-        for (i, operand) in operands.into_iter().enumerate() {
-            if i != 0 {
-                buf.push_str(", ");
-            }
-            self.generate_operand_assembly(*operand, buf);
-        }
-
+        buf.push_str(&format!("    {}", opcode_str));
+        buf.push_str(opcode_size_suffix(mir.operands.size()));
+        self.generate_operands(&mir.operands, buf);
         buf.push_str("\n");
     }
 
     pub fn generate_jump(&self, instr: &Instruction, mir: &MirInstruction, buf: &mut String) {
-        if let Some(cond) = instr.cond.as_ref() {
-            buf.push_str("    cmpq ");
-            let [&a, &b] = cond.operands();
-            // Imm values can only be in the first operand
-
-            let (first, second) = if a.is_immediate() { (a, b) } else { (b, a) };
-            self.generate_operand_assembly(first, buf);
-            buf.push_str(", ");
-            self.generate_operand_assembly(second, buf);
-            buf.push_str("\n");
+        if let Some(cond) = &mir.condition {
+            self.generate_binary_instruction(
+                "cmp",
+                &MirInstruction {
+                    operands: cond.operands(),
+                    condition: None,
+                    signed: false,
+                },
+                buf,
+            );
         }
 
         let opcode = match instr.cond.as_ref() {
@@ -289,6 +296,7 @@ impl<'a> ProcAssemblyGen<'a> {
     }
 
     pub fn generate_operand_register(&self, reg: &SizedRegister, buf: &mut String) {
+        buf.push_str("%");
         buf.push_str(reg.register.name(reg.size));
     }
 
@@ -310,35 +318,6 @@ impl<'a> ProcAssemblyGen<'a> {
     pub fn generate_operand_immediate(&self, imm: &Immediate, buf: &mut String) {
         buf.push_str(&format!("${}", imm.bits));
     }
-
-    // TODO remove this and move to mir Operands.
-    pub fn generate_operand_assembly(&self, operand: IrOperand, buf: &mut String) {
-        match operand {
-            IrOperand::Imm(imm) => buf.push_str(&format!("${}", imm)),
-            IrOperand::Var(Variable::Virtual(virt_id)) => {
-                let register_id = self
-                    .proc
-                    .data
-                    .register_allocation(virt_id)
-                    .expect("variable not allocated");
-                buf.push_str("%");
-                buf.push_str(Register::variant(register_id).name(Size::Qword));
-            }
-            IrOperand::Var(Variable::Stack(stack_slot_id)) => {
-                let offset = self
-                    .proc
-                    .data
-                    .stack_data
-                    .stack_var_memory_offset(stack_slot_id);
-                buf.push_str(&format!("{}(%rbp)", offset));
-            }
-            IrOperand::Var(Variable::Data(data_id)) => {
-                let data_label = make_data_label(data_id);
-                buf.push_str(&format!("({})", data_label));
-            }
-            oprnd => unimplemented!("{:?}", oprnd),
-        }
-    }
 }
 
 fn make_block_label(proc: &Procedure, block_name: &str) -> String {
@@ -348,3 +327,22 @@ fn make_block_label(proc: &Procedure, block_name: &str) -> String {
 fn make_data_label(data_id: DataId) -> String {
     format!("datum_d{}", data_id)
 }
+
+fn opcode_size_suffix(size: Size) -> &'static str {
+    match size {
+        Size::Qword => "q",
+        Size::Dword => "l",
+        Size::Word => "w",
+        Size::Byte => "b",
+    }
+}
+
+// Do I need this one?
+// fn opcode_size_suffix_no_word(size: Size) -> &'static str {
+//     match size {
+//         Size::Qword => "q",
+//         Size::Dword => "l",
+//         Size::Word => "",
+//         Size::Byte => "b",
+//     }
+// }

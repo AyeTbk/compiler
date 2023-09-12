@@ -20,6 +20,20 @@ pub enum Operands {
 }
 
 impl Operands {
+    pub fn size(&self) -> Size {
+        match self {
+            Self::Register(reg) => reg.size,
+            Self::RegisterRegister(reg1, _) => reg1.size,
+            Self::RegisterMemory(reg, _) => reg.size,
+            Self::RegisterImmediate(reg, _) => reg.size,
+            Self::Memory(mem) => mem.size,
+            Self::MemoryRegister(mem, _) => mem.size,
+            Self::MemoryImmediate(mem, _) => mem.size,
+            Self::Immediate(imm) => imm.size,
+            _ => Size::Word,
+        }
+    }
+
     pub fn size_one(&self) -> Option<Size> {
         match self {
             Self::Register(reg) => Some(reg.size),
@@ -37,6 +51,39 @@ impl Operands {
             Self::MemoryRegister(mem, reg) => Some((mem.size, reg.size)),
             Self::MemoryImmediate(mem, imm) => Some((mem.size, imm.size)),
             _ => None,
+        }
+    }
+
+    pub fn set_sizes_two(&mut self, size1: Size, size2: Size) {
+        match self {
+            Self::RegisterRegister(reg1, reg2) => {
+                reg1.size = size1;
+                reg2.size = size2
+            }
+            Self::RegisterMemory(reg, mem) => {
+                reg.size = size1;
+                mem.size = size2;
+            }
+            Self::RegisterImmediate(reg, imm) => {
+                reg.size = size1;
+                imm.size = size2;
+            }
+            Self::MemoryRegister(mem, reg) => {
+                mem.size = size1;
+                reg.size = size2;
+            }
+            Self::MemoryImmediate(mem, imm) => {
+                mem.size = size1;
+                imm.size = size2;
+            }
+            _ => panic!("cannot set size_two"),
+        }
+    }
+
+    pub fn are_same_two(&self) -> bool {
+        match self {
+            Self::RegisterRegister(reg1, reg2) => reg1.register == reg2.register,
+            _ => false,
         }
     }
 }
@@ -89,6 +136,14 @@ pub enum JumpTarget {
 pub enum Condition {
     Equals(Operands),
     NotEquals(Operands),
+}
+
+impl Condition {
+    pub fn operands(&self) -> Operands {
+        match self {
+            Self::Equals(op) | Self::NotEquals(op) => op.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

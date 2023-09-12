@@ -55,7 +55,7 @@ pub fn make_mir(module: &Module, context: &Context) -> MirModule {
                         }
                         Operands::JumpTarget(jump_target)
                     }
-                    Opcode::Move => {
+                    Opcode::Move | Opcode::Convert => {
                         let op1 = instr.dst.map(|dst| {
                             make_mir_operand(module, context, proc, &IrOperand::Var(dst))
                         });

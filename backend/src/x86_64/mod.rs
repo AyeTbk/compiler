@@ -74,7 +74,7 @@ impl TryFrom<u64> for Size {
 macro_rules! define_registers {
     ($($variant:ident : $qstr:expr, $dstr:expr, $wstr:expr, $bstr:expr);* $(;)?) => {
         #[repr(u32)]
-        #[derive(Debug, Clone, Copy)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum Register {
             $($variant),*
         }
