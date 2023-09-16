@@ -45,8 +45,8 @@ pub struct ProcedureData {
 }
 
 impl ProcedureData {
-    pub fn stack_variable_type(&self, _stack_id: StackId) -> Option<Type> {
-        Some(Type::Integer(IntegerType::U64))
+    pub fn stack_variable_type(&self, stack_id: StackId) -> Option<Type> {
+        todo!("this plz tyvm")
     }
 
     pub fn virtual_variable_type(&self, virt_id: VirtualId) -> Option<Type> {

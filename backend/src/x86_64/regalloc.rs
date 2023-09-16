@@ -190,8 +190,8 @@ fn apply_allocations(proc: &mut Procedure, allocs: &Allocations) {
 
 fn correct_moves_loads_stores(proc: &mut Procedure) {
     // Corrections:
-    // sX = move rY   =>   change opcode to Store.
-    // rX = move sY   =>   change opcode to Load.
+    // sX = move vY   =>   change opcode to Store.
+    // vX = move sY   =>   change opcode to Load.
 
     // TODO: add this too vvv
     // X = move X   =>   remove instr.
@@ -206,8 +206,8 @@ fn correct_moves_loads_stores(proc: &mut Procedure) {
 
         use Variable::*;
         match (dst, src.as_variable()) {
-            (Stack(_), Some(Register(_))) => instr.opcode = Opcode::Store,
-            (Register(_), Some(Stack(_))) => instr.opcode = Opcode::Load,
+            (Stack(_), Some(Virtual(_))) => instr.opcode = Opcode::Store,
+            (Virtual(_), Some(Stack(_))) => instr.opcode = Opcode::Load,
             _ => (),
         }
     });

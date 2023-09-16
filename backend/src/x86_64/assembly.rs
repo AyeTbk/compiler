@@ -202,7 +202,7 @@ impl<'a> ProcAssemblyGen<'a> {
         if dst_size <= src_size {
             buf.push_str(opcode_size_suffix(dst_size));
         } else {
-            unimplemented!("support for sign/zero extend comes from the 'convert' IR instr.");
+            unimplemented!("support for sign/zero extend is handled by the 'convert' IR instr.");
         }
         self.generate_operands(&mir.operands, buf);
         buf.push_str("\n");

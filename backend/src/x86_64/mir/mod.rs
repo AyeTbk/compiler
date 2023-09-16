@@ -55,7 +55,7 @@ pub fn make_mir(module: &Module, context: &Context) -> MirModule {
                         }
                         Operands::JumpTarget(jump_target)
                     }
-                    Opcode::Move | Opcode::Convert => {
+                    Opcode::Move | Opcode::Convert | Opcode::Load | Opcode::Store => {
                         let op1 = instr.dst.map(|dst| {
                             make_mir_operand(module, context, proc, &IrOperand::Var(dst))
                         });
@@ -63,7 +63,7 @@ pub fn make_mir(module: &Module, context: &Context) -> MirModule {
                             .operands()
                             .next()
                             .map(|op| make_mir_operand(module, context, proc, op));
-                        combine_mir_operands(op1, op2).expect("invalid condition operands")
+                        combine_mir_operands(op1, op2).expect("invalid operands")
                     }
                     _ => {
                         let mut o = instr.operands();
@@ -73,7 +73,7 @@ pub fn make_mir(module: &Module, context: &Context) -> MirModule {
                         let op2 = o
                             .next()
                             .map(|op| make_mir_operand(module, context, proc, op));
-                        combine_mir_operands(op1, op2).expect("invalid condition operands")
+                        combine_mir_operands(op1, op2).expect("invalid operands")
                     }
                 };
                 instrs.push(MirInstruction {
