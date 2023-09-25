@@ -171,7 +171,7 @@ fn make_mir_operand(
                 let rbp_offset = proc
                     .data
                     .stack_data
-                    .stack_var_memory_offset(stack_id)
+                    .stack_var_memory_offset(stack_id, context)
                     .try_into()
                     .unwrap();
                 Operand::Memory(SizedMemory {

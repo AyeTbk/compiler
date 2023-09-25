@@ -10,10 +10,10 @@ use crate::instruction::Condition;
 use crate::instruction::Target;
 use crate::procedure::ExternalProcedure;
 use crate::procedure::RegisterId;
+use crate::procedure::Signature;
 use crate::procedure::StackData;
 use crate::procedure::StackId;
 use crate::procedure::VirtualId;
-use crate::procedure::{Signature, StackSlotKind};
 use crate::r#type::Type;
 use crate::{
     instruction::{Instruction, Opcode, Operand, SourceOperands},
@@ -207,6 +207,7 @@ impl ConverterAstToModule {
                 }
             };
             if let Some(typ) = typ {
+                // FIXME handle other variable types correctly maybe
                 let virt_id = instr.dst.unwrap().as_virtual().unwrap();
                 virtual_types.insert(virt_id, typ);
             }
@@ -239,25 +240,23 @@ impl ConverterAstToModule {
 
         for ast_instruction in ast_stack_block.instructions.iter() {
             match Self::ast_instruction_to_stack_data_item(ast_instruction)? {
-                StackDataItem::Call { idx, size } => {
-                    let actual_idx = stack_data.allocate_call(size);
-                    assert_eq!(actual_idx, idx);
+                StackDataItem::Local { stack_id, typ } => {
+                    let actual_id = stack_data.allocate_local_stack_slot(typ);
+                    assert_eq!(actual_id, stack_id);
                 }
-                StackDataItem::CallVar {
-                    id,
+                StackDataItem::Param { stack_id, typ } => {
+                    let actual_id = stack_data.allocate_param_stack_slot(typ);
+                    assert_eq!(actual_id, stack_id);
+                }
+                StackDataItem::CalleeParam {
+                    stack_id,
                     call_idx,
-                    ordinal,
+                    param_idx,
                     typ,
                 } => {
-                    let actual_id = stack_data.allocate_call_stack_var(call_idx, ordinal);
-                    assert_eq!(actual_id, id);
-                }
-                StackDataItem::SlotVar { id, kind, typ } => {
-                    let actual_id = match &kind {
-                        StackSlotKind::Local => stack_data.allocate_local_stack_slot(typ),
-                        StackSlotKind::Caller => stack_data.allocate_caller_stack_slot(typ),
-                    };
-                    assert_eq!(actual_id, id);
+                    let actual_id =
+                        stack_data.allocate_callee_param_stack_slot(call_idx, param_idx, typ);
+                    assert_eq!(actual_id, stack_id);
                 }
             }
         }
@@ -280,40 +279,37 @@ impl ConverterAstToModule {
         };
 
         match ast_instr.opcode.text {
-            kind_str @ ("local" | "caller") => {
-                let kind = match kind_str {
-                    "local" => StackSlotKind::Local,
-                    "caller" => StackSlotKind::Caller,
-                    _ => unreachable!(),
-                };
-                let id = maybe_stack_var_id.unwrap();
-                Ok(StackDataItem::SlotVar {
-                    id,
-                    kind,
+            "local" => {
+                let stack_id = maybe_stack_var_id.unwrap();
+                Ok(StackDataItem::Local {
+                    stack_id,
                     typ: maybe_typ.unwrap(),
                 })
             }
-            "call" => {
-                dbg!(&ast_instr.operands);
+            "param" => {
+                let stack_id = maybe_stack_var_id.unwrap();
+                Ok(StackDataItem::Param {
+                    stack_id,
+                    typ: maybe_typ.unwrap(),
+                })
+            }
+            "callee" => {
+                let stack_id = maybe_stack_var_id.unwrap();
                 let call_idx = ast_instr.operands[0].text.parse::<u32>().unwrap();
-                let ordinal = ast_instr.operands[1].text.parse::<u32>().unwrap();
-                if let Some(id) = maybe_stack_var_id {
-                    Ok(StackDataItem::CallVar {
-                        id,
-                        call_idx,
-                        ordinal,
-                        typ: maybe_typ.unwrap(),
-                    })
-                } else {
-                    Ok(StackDataItem::Call {
-                        idx: call_idx,
-                        size: ordinal,
-                    })
-                }
+                let param_idx = ast_instr.operands[1].text.parse::<u32>().unwrap();
+                Ok(StackDataItem::CalleeParam {
+                    stack_id,
+                    call_idx,
+                    param_idx,
+                    typ: maybe_typ.unwrap(),
+                })
             }
             kind_str => {
                 return Err(Error::new(
-                    format!("invalid stack item kind `{}`", kind_str),
+                    format!(
+                        "invalid stack item kind `{}`. Expected `local`, `param` or `callee`.",
+                        kind_str
+                    ),
                     &ast_instr.opcode,
                 ));
             }
@@ -544,22 +540,18 @@ struct ConvertedBlock {
 
 // TODO rename this stuff
 enum StackDataItem {
-    // Sum of space used by associated parameters for a proc call
-    Call {
-        idx: u32,
-        size: u32,
-    },
-    // Call parameter var
-    CallVar {
-        id: StackId,
-        call_idx: u32,
-        ordinal: u32,
+    Local {
+        stack_id: StackId,
         typ: Type,
     },
-    // Local var
-    SlotVar {
-        id: StackId,
-        kind: StackSlotKind,
+    Param {
+        stack_id: StackId,
+        typ: Type,
+    },
+    CalleeParam {
+        stack_id: StackId,
+        call_idx: u32,
+        param_idx: u32,
         typ: Type,
     },
 }

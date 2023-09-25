@@ -109,7 +109,10 @@ impl<'a> ProcAssemblyGen<'a> {
         buf.push_str("    movq %rsp, %rbp\n");
         buf.push_str(&format!(
             "    subq ${}, %rsp\n",
-            self.proc.data.stack_data.total_local_stack_size()
+            self.proc
+                .data
+                .stack_data
+                .total_local_stack_size(self.context)
         ));
     }
 

@@ -8,8 +8,8 @@ use crate::{
     instruction::{Condition, Instruction, Operand, Target},
     module::Module,
     procedure::{
-        Block, DataId, ExternalProcedure, Procedure, RegisterId, StackData, StackSlotKind,
-        StackVar, Variable, VirtualId,
+        Block, DataId, ExternalProcedure, Procedure, RegisterId, StackData, StackId, StackVar,
+        Variable, VirtualId,
     },
     r#type::Type,
 };
@@ -123,32 +123,34 @@ impl<'a, W: Write> ModuleSerializer<'a, W> {
         self.write_str(typ.as_str())
     }
 
-    fn serialize_stack_block(&mut self, _proc: &Procedure, stack_data: &StackData) -> Result {
-        if stack_data.slots.is_empty() {
+    fn serialize_stack_block(&mut self, proc: &Procedure, stack_data: &StackData) -> Result {
+        if stack_data.vars.is_empty() {
             return Ok(());
         }
 
         self.write_str("stack ")?;
         self.block(|this| {
-            for (i, stack_call) in stack_data.calls.iter().enumerate() {
-                this.writeln_str(&format!("call {}, {};", i, stack_call.size))?;
-            }
             for (i, stack_var) in stack_data.vars.iter().enumerate() {
-                this.write_fmt(format_args!("s{i} = "))?;
+                if let Some(typ) = proc.data.stack_variable_type(i as StackId) {
+                    this.write_fmt(format_args!("s{i}"))?;
+                    this.serialize_type_annotation(&typ)?;
+                    this.write_str(" = ")?;
+                } else {
+                    this.write_fmt(format_args!("s{i} = "))?;
+                }
                 match &stack_var {
-                    StackVar::Call { call_idx, ordinal } => {
-                        this.write_fmt(format_args!("call {}, {}", call_idx, ordinal))?;
+                    StackVar::Local(_) => {
+                        this.write_str("local")?;
                     }
-                    StackVar::Slot(slot_idx) => {
-                        let slot = &stack_data.slots[*slot_idx];
-                        match &slot.kind {
-                            StackSlotKind::Local => {
-                                this.write_str("local")?;
-                            }
-                            StackSlotKind::Caller => {
-                                this.write_str("caller")?;
-                            }
-                        }
+                    StackVar::Param(_) => {
+                        this.write_str("param")?;
+                    }
+                    StackVar::CalleeParam {
+                        callee_idx,
+                        param_idx,
+                        ..
+                    } => {
+                        this.write_fmt(format_args!("callee {}, {}", callee_idx, param_idx))?;
                     }
                 }
                 this.writeln_str(";")?;
